@@ -1,0 +1,25 @@
+{
+  "name": "itecify",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @itecify/shared build && pnpm -r --parallel --filter \"./apps/*\" dev",
+    "build": "pnpm -r run build",
+    "dev:web": "pnpm --filter @itecify/web dev",
+    "dev:api": "pnpm --filter @itecify/api dev",
+    "dev:collab": "pnpm --filter @itecify/collab dev",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:studio": "prisma studio"
+  },
+  "devDependencies": {
+    "@prisma/client": "^6.6.0",
+    "prisma": "^6.6.0",
+    "typescript": "~5.8.3"
+  }
+}

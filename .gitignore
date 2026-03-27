@@ -32,6 +32,15 @@ yarn-error.log*
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+dist/
+
+# Build outputs (monorepo)
+apps/*/dist/
+packages/*/dist/
+
+# Prisma
+prisma/*.db
+prisma/*.db-journal
 
 # IDE
 .vscode/
