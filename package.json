@@ -7,7 +7,7 @@
     "node": ">=20"
   },
   "scripts": {
-    "dev": "pnpm --filter @itecify/shared build && pnpm -r --parallel --filter \"./apps/*\" dev",
+    "dev": "pnpm --filter @itecify/shared build && pnpm -r --parallel --stream --filter \"./apps/*\" dev",
     "build": "pnpm -r run build",
     "dev:web": "pnpm --filter @itecify/web dev",
     "dev:api": "pnpm --filter @itecify/api dev",

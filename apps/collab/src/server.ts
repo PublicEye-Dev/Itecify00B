@@ -1,3 +1,7 @@
+/**
+ * Un room Yjs = parametrul `roomname` din protocolul y-websocket (client: `WebsocketProvider(url, roomname, doc)`).
+ * Folosim același string ca `workspaceId` din frontend pentru a izola starea per workspace.
+ */
 import "./env.js";
 import http from "node:http";
 import process from "node:process";
@@ -5,11 +9,15 @@ import { createRequire } from "node:module";
 import { WebSocketServer } from "ws";
 import { createHealthPayload } from "@itecify/shared";
 
+console.log("[collab] Starting…");
 const require = createRequire(import.meta.url);
-const { setupWSConnection } = require("y-websocket/bin/utils.cjs");
+/** Folosește `y-websocket/bin/utils` (export oficial); `…/utils.cjs` nu e în `package.json#exports` → ESM dă ERR_PACKAGE_PATH_NOT_EXPORTED. */
+const { setupWSConnection } = require("y-websocket/bin/utils");
 
 const host = process.env.COLLAB_HOST ?? "0.0.0.0";
 const port = Number(process.env.COLLAB_PORT ?? "1234");
+
+console.log(`[collab] Binding (port ${port})…`);
 
 const wss = new WebSocketServer({ noServer: true });
 wss.on("connection", setupWSConnection);
@@ -31,6 +39,12 @@ server.on("upgrade", (request, socket, head) => {
   });
 });
 
+server.on("error", (err) => {
+  console.error("[collab] Server error (port în uz?):", err);
+  process.exit(1);
+});
+
 server.listen(port, host, () => {
-  console.log(`[collab] Yjs WebSocket + GET /health on http://${host}:${port}`);
+  const shown = host === "0.0.0.0" ? "127.0.0.1" : host;
+  console.log(`[collab] Ready — http://${shown}:${port}  (GET /health, WebSocket Yjs)`);
 });
