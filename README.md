@@ -25,7 +25,7 @@ Monorepo pentru un editor colaborativ de cod, sugestii AI și rulare în sandbox
 2. Copiază variabilele de mediu:
 
    ```bash
-   cp .env.example .env
+   cp apps/.env.example .env
    ```
 
 3. Pornește Postgres:
@@ -48,6 +48,12 @@ Monorepo pentru un editor colaborativ de cod, sugestii AI și rulare în sandbox
    pnpm db:push
    ```
 
+   Seed pentru conturile demo:
+
+   ```bash
+   pnpm db:seed
+   ```
+
 5. Pornește toate aplicațiile în paralel:
 
    ```bash
@@ -66,8 +72,8 @@ Monorepo pentru un editor colaborativ de cod, sugestii AI și rulare în sandbox
 
 ## Health checks
 
-| Serviciu | URL                    |
-| -------- | ---------------------- |
+| Serviciu | URL                                |
+| -------- | ---------------------------------- |
 | API      | `GET http://localhost:3001/health` |
 | Collab   | `GET http://localhost:1234/health` |
 
@@ -83,16 +89,28 @@ WebSocket Yjs: `ws://localhost:1234` (același server ca health-ul de mai sus).
 
 Variabile utile în `.env`: `VITE_API_URL`, `VITE_COLLAB_WS_URL`.
 
+## Authentication
+
+- **Auth flow:** email + password, cu cookie de sesiune `httpOnly` și `SameSite=Lax`; în dezvoltare, `AUTH_COOKIE_SECURE=false` permite rularea pe `http://localhost`.
+- **Endpoint-uri:** `POST /auth/signup`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me`.
+- **Protecție:** snapshot-urile API și conexiunile WebSocket de colaborare cer sesiune validă; browserul nu persistă token-uri în `localStorage`.
+- **Roluri:** `owner`, `editor`.
+- **Conturi demo seed-uite:**
+  - `owner@itecify.demo` / `DemoPass123!`
+  - `editor1@itecify.demo` / `DemoPass123!`
+  - `editor2@itecify.demo` / `DemoPass123!`
+
 ## Scripturi utile (rădăcină)
 
-| Script        | Rol                          |
-| ------------- | ---------------------------- |
-| `pnpm dev`    | `shared` build + apps în dev |
-| `pnpm build`  | build pe toate pachetele     |
-| `pnpm db:generate` | `prisma generate`       |
-| `pnpm db:push`     | `prisma db push`        |
-| `pnpm db:migrate`  | `prisma migrate dev`    |
-| `pnpm db:studio`   | Prisma Studio           |
+| Script             | Rol                          |
+| ------------------ | ---------------------------- |
+| `pnpm dev`         | `shared` build + apps în dev |
+| `pnpm build`       | build pe toate pachetele     |
+| `pnpm db:generate` | `prisma generate`            |
+| `pnpm db:push`     | `prisma db push`             |
+| `pnpm db:migrate`  | `prisma migrate dev`         |
+| `pnpm db:seed`     | `prisma db seed`             |
+| `pnpm db:studio`   | Prisma Studio                |
 
 ## Structură directoare
 
@@ -129,3 +147,12 @@ După `pnpm dev`:
 4. `docker compose -f infra/docker-compose.yml ps` → `postgres` healthy.
 
 Pentru Prisma: `pnpm db:studio` și verifică conexiunea la `DATABASE_URL` din `.env`.
+
+Pentru auth:
+
+1. Rulează `pnpm db:push` apoi `pnpm db:seed`.
+2. Deschide `http://localhost:5173` și autentifică-te cu unul dintre conturile demo.
+3. Verifică în DevTools că răspunsurile `POST /auth/login` și `GET /auth/me` funcționează, iar cookie-ul `itecify_session` este `httpOnly` și nu există niciun token în `localStorage`.
+4. Reîncarcă pagina: sesiunea trebuie restaurată automat și workspace-ul rămâne accesibil.
+5. Apasă `Logout`: `POST /auth/logout` trebuie să golească sesiunea, iar o nouă cerere la `GET /auth/me` trebuie să întoarcă `401`.
+6. Opțional, deschide aplicația într-un tab incognito fără login și confirmă că snapshot-ul și WebSocket-ul nu se conectează.

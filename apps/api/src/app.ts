@@ -1,0 +1,52 @@
+import "./env.js";
+import process from "node:process";
+import cors from "@fastify/cors";
+import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import { createHealthPayload } from "@itecify/shared";
+import { ZodError } from "zod";
+import { HttpError, toErrorDto, toFieldErrors } from "./modules/auth/errors.js";
+import { registerAuthRoutes } from "./modules/auth/routes.js";
+import { registerWorkspaceRoutes } from "./modules/workspaces/routes.js";
+import { registerAuthPlugin } from "./plugins/auth.js";
+import { registerPrismaPlugin } from "./plugins/prisma.js";
+
+export async function buildApp() {
+  const app = Fastify({
+    logger: process.env.NODE_ENV === "production",
+  });
+
+  await app.register(cors, {
+    credentials: true,
+    origin(origin, callback) {
+      callback(null, origin ?? false);
+    },
+  });
+
+  await registerPrismaPlugin(app);
+  await registerAuthPlugin(app);
+
+  app.setErrorHandler(
+    (error: Error, request: FastifyRequest, reply: FastifyReply) => {
+      if (error instanceof HttpError) {
+        return reply
+          .code(error.statusCode)
+          .send(toErrorDto(error.message, error.fieldErrors));
+      }
+
+      if (error instanceof ZodError) {
+        return reply
+          .code(400)
+          .send(toErrorDto("Invalid request payload.", toFieldErrors(error)));
+      }
+
+      request.log.error(error);
+      return reply.code(500).send(toErrorDto("Internal server error."));
+    },
+  );
+
+  app.get("/health", async () => createHealthPayload("api"));
+  await app.register(registerAuthRoutes, { prefix: "/auth" });
+  await app.register(registerWorkspaceRoutes);
+
+  return app;
+}
