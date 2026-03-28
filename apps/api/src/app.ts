@@ -7,6 +7,7 @@ import { createHealthPayload } from "@itecify/shared";
 import { ZodError } from "zod";
 import { HttpError, toErrorDto, toFieldErrors } from "./modules/auth/errors.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
+import { registerAiRoutes } from "./modules/ai/ai.routes.js";
 import { registerJobRoutes } from "./modules/jobs/job.routes.js";
 import { registerWorkspaceRoutes } from "./modules/workspaces/routes.js";
 import { registerAuthPlugin } from "./plugins/auth.js";
@@ -57,6 +58,7 @@ export async function buildApp() {
   await app.register(registerAuthRoutes, { prefix: "/auth" });
   await app.register(registerWorkspaceRoutes);
   await app.register(registerJobRoutes);
+  await app.register(registerAiRoutes);
 
   return app;
 }
