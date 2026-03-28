@@ -11,7 +11,9 @@ console.log(`[api] Starting (port ${port})…`);
 try {
   await app.listen({ port, host });
   const shown = host === "0.0.0.0" ? "127.0.0.1" : host;
-  console.log(`[api] Ready — http://${shown}:${port}  (GET /health)`);
+  console.log(
+    `[api] Ready — http://${shown}:${port}  (GET /health, POST /jobs — necesită sesiune)`,
+  );
 } catch (err) {
   console.error("[api] Failed to listen (port în uz sau altă eroare):", err);
   await app.close();

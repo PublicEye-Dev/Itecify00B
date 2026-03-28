@@ -20,11 +20,15 @@ export const loginRequestSchema = z.object({
 });
 
 export const userDtoSchema = z.object({
-  id: z.string().uuid(),
+  id: z.string().min(1),
   email: emailSchema,
   name: displayNameSchema,
   role: userRoleSchema,
-  createdAt: z.string().datetime({ offset: true }),
+  /** ISO 8601 (inclusiv sufixul `Z` din `toISOString()`). */
+  createdAt: z
+    .string()
+    .min(1)
+    .refine((s) => !Number.isNaN(Date.parse(s)), { message: "Invalid createdAt" }),
 });
 
 export const authResponseSchema = z.object({

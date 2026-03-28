@@ -1,14 +1,13 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import type { UserDto } from "@itecify/shared/auth";
-import { WorkspaceCollabLayout } from "./features/files/WorkspaceCollabLayout.js";
 import { getCurrentUser, logout } from "./lib/api/authApi.js";
 import { ApiClientError } from "./lib/api/client.js";
-import { WorkspaceCollabProvider } from "./lib/collab/WorkspaceCollabProvider.js";
 import { AuthPage } from "./routes/login/AuthPage.js";
-import { useWorkspaceId } from "./useWorkspaceId.js";
+import { DashboardPage } from "./routes/dashboard/DashboardPage.js";
+import { WorkspaceShell } from "./routes/workspace/WorkspaceShell.js";
 
 export function App(): ReactNode {
-  const workspaceId = useWorkspaceId();
   const [currentUser, setCurrentUser] = useState<UserDto | null>(null);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -93,12 +92,28 @@ export function App(): ReactNode {
   }
 
   return (
-    <WorkspaceCollabProvider workspaceId={workspaceId}>
-      <WorkspaceCollabLayout
-        currentUser={currentUser}
-        onLogout={handleLogout}
-        workspaceId={workspaceId}
-      />
-    </WorkspaceCollabProvider>
+    <BrowserRouter>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <DashboardPage
+              currentUser={currentUser}
+              onLogout={() => void handleLogout()}
+            />
+          }
+        />
+        <Route
+          path="/workspace/:workspaceId"
+          element={
+            <WorkspaceShell
+              currentUser={currentUser}
+              onLogout={handleLogout}
+            />
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }

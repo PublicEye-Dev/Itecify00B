@@ -23,22 +23,28 @@ export async function registerAuthPlugin(app: FastifyInstance): Promise<void> {
     async (request: FastifyRequest, reply: FastifyReply) => {
       request.auth = null;
 
-      const token = request.cookies[SESSION_COOKIE_NAME];
+      const token = request.cookies?.[SESSION_COOKIE_NAME];
       if (!token) return;
 
-      const session = await getAuthenticatedSession(app.prisma, token);
-      if (!session) {
+      try {
+        const session = await getAuthenticatedSession(app.prisma, token);
+        if (!session) {
+          clearSessionCookie(reply);
+          return;
+        }
+
+        request.auth = {
+          sessionId: session.sessionId,
+          user: session.user,
+        };
+
+        if (session.shouldRefresh) {
+          setSessionCookie(reply, token, session.expiresAt);
+        }
+      } catch (err) {
+        /** DB lipsă / sesiune coruptă — nu blocăm login/signup cu 500 din hook. */
+        request.log.warn({ err }, "Session bootstrap failed");
         clearSessionCookie(reply);
-        return;
-      }
-
-      request.auth = {
-        sessionId: session.sessionId,
-        user: session.user,
-      };
-
-      if (session.shouldRefresh) {
-        setSessionCookie(reply, token, session.expiresAt);
       }
     },
   );
