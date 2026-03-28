@@ -3,24 +3,23 @@ import type * as monaco from "monaco-editor";
 import * as monacoNs from "monaco-editor";
 import { MonacoBinding } from "y-monaco";
 import type { Text as YText } from "yjs";
-import type { Awareness } from "y-protocols/awareness";
+import { bindRemoteCursorChannel } from "../../lib/collab/remoteCursorChannel.js";
 import { languageFromPath } from "./languageFromPath.js";
+import "./yMonacoRemote.css";
 
-/**
- * Legătură între `Y.Text` și un model Monaco prin `y-monaco`.
- * La schimbarea fișierului: distrugem binding + modelul vechi și creăm altele noi
- * (același editor `IStandaloneCodeEditor`, alt `ITextModel`).
- */
 export function CollabMonacoEditor({
   workspaceId,
   activePath,
   ytext,
-  awareness,
+  localUser,
+  cursorColorHex,
 }: {
   workspaceId: string;
   activePath: string | null;
   ytext: YText | null;
-  awareness: Awareness | undefined;
+  localUser: { id: string; name: string };
+  /** #rrggbb pentru etichete și caret în canalul CURSOR_MOVE */
+  cursorColorHex: string;
 }): ReactNode {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
@@ -72,14 +71,26 @@ export function CollabMonacoEditor({
     editor.setModel(model);
     modelRef.current = model;
 
-    const binding = new MonacoBinding(ytext, model, new Set([editor]), awareness ?? null);
+    /** Fără awareness: cursori remote doar prin /ws-cursor (fără decorații duplicate y-monaco). */
+    const binding = new MonacoBinding(ytext, model, new Set([editor]), null);
     bindingRef.current = binding;
 
+    const disposeCursors = bindRemoteCursorChannel({
+      workspaceId,
+      filePath: activePath,
+      localUserId: localUser.id,
+      displayName: localUser.name,
+      color: cursorColorHex,
+      editor,
+      model,
+    });
+
     return () => {
+      disposeCursors();
       binding.destroy();
       model.dispose();
     };
-  }, [activePath, awareness, workspaceId, ytext]);
+  }, [activePath, workspaceId, ytext, localUser.id, localUser.name, cursorColorHex]);
 
   return (
     <div
