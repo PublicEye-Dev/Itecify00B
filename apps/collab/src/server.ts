@@ -6,8 +6,11 @@ import "./env.js";
 import http from "node:http";
 import process from "node:process";
 import { createRequire } from "node:module";
+import type { Duplex } from "node:stream";
+import { PrismaClient } from "@prisma/client";
 import { WebSocketServer } from "ws";
 import { createHealthPayload } from "@itecify/shared";
+import { hasValidSession } from "./auth.js";
 
 console.log("[collab] Starting…");
 const require = createRequire(import.meta.url);
@@ -19,8 +22,30 @@ const port = Number(process.env.COLLAB_PORT ?? "1234");
 
 console.log(`[collab] Binding (port ${port})…`);
 
+const prisma = new PrismaClient();
 const wss = new WebSocketServer({ noServer: true });
 wss.on("connection", setupWSConnection);
+
+function rejectUpgrade(
+  socket: Duplex,
+  statusCode: number,
+  message: string,
+): void {
+  const body = Buffer.from(message, "utf8");
+  const statusText =
+    statusCode === 401 ? "Unauthorized" : "Internal Server Error";
+  socket.write(
+    [
+      `HTTP/1.1 ${statusCode} ${statusText}`,
+      "Connection: close",
+      "Content-Type: text/plain; charset=utf-8",
+      `Content-Length: ${body.byteLength}`,
+      "",
+      message,
+    ].join("\r\n"),
+  );
+  socket.destroy();
+}
 
 const server = http.createServer((req, res) => {
   const path = req.url?.split("?")[0] ?? "";
@@ -34,8 +59,22 @@ const server = http.createServer((req, res) => {
 });
 
 server.on("upgrade", (request, socket, head) => {
-  wss.handleUpgrade(request, socket, head, (ws) => {
-    wss.emit("connection", ws, request);
+  void (async () => {
+    const isAuthenticated = await hasValidSession(
+      prisma,
+      request.headers.cookie,
+    );
+    if (!isAuthenticated) {
+      rejectUpgrade(socket, 401, "Authentication required.");
+      return;
+    }
+
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit("connection", ws, request);
+    });
+  })().catch((err) => {
+    console.error("[collab] Upgrade auth failed:", err);
+    rejectUpgrade(socket, 500, "Failed to authorize WebSocket connection.");
   });
 });
 
@@ -44,7 +83,13 @@ server.on("error", (err) => {
   process.exit(1);
 });
 
+server.on("close", () => {
+  void prisma.$disconnect();
+});
+
 server.listen(port, host, () => {
   const shown = host === "0.0.0.0" ? "127.0.0.1" : host;
-  console.log(`[collab] Ready — http://${shown}:${port}  (GET /health, WebSocket Yjs)`);
+  console.log(
+    `[collab] Ready — http://${shown}:${port}  (GET /health, WebSocket Yjs)`,
+  );
 });
