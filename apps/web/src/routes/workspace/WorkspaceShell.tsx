@@ -93,6 +93,8 @@ export function WorkspaceShell({
     <WorkspaceCollabProvider workspaceId={workspaceId}>
       <WorkspaceCollabLayout
         workspaceId={workspaceId}
+        workspaceName={workspace.name}
+        shareToken={workspace.shareToken}
         workspaceTemplate={workspace.template}
         currentUser={currentUser}
         onLogout={onLogout}
