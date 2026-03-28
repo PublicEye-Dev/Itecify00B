@@ -1,5 +1,6 @@
 import {
   authResponseSchema,
+  authSessionResponseSchema,
   loginRequestSchema,
   logoutResponseSchema,
   signupRequestSchema,
@@ -46,6 +47,6 @@ export function getCurrentUser() {
     {
       method: "GET",
     },
-    authResponseSchema,
+    authSessionResponseSchema,
   );
 }

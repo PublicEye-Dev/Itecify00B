@@ -91,8 +91,19 @@ Variabile utile în `.env`: `VITE_API_URL`, `VITE_COLLAB_WS_URL`.
 
 ### Runner Docker (Phase 1)
 
-- În editor, butonul **Rulează (template) în Docker** salvează snapshot-ul, apoi `POST /jobs` și afișează stdout/stderr când job-ul ajunge într-o stare terminală.
-- Necesită **Docker Desktop** (sau daemon compatibil) și prima rulare poate descărca imaginile din `apps/api/src/modules/runtime-templates/recipes.ts`.
+- În editor, panoul **Run Pipeline** salvează snapshot-ul, pornește `POST /jobs`, apoi afișează în timp real stările **scanning / blocked / building / running / completed / failed** și logurile live prin `GET /jobs/:id/stream`.
+- Fiecare job trece printr-un **scan Semgrep CE** înainte de build/run. Implicit, findings `HIGH` și `CRITICAL` blochează execuția; severitățile mai mici sunt afișate ca warnings în UI.
+- Execuția Docker aplică limite separate pentru scan/build/run: CPU, memorie, timeout per fază și guard pentru dimensiunea logurilor capturate.
+- Necesită **Docker Desktop** (sau daemon compatibil) și prima rulare poate descărca imaginile din `apps/api/src/modules/runtime-templates/recipes.ts`, plus imaginea Semgrep.
+
+Variabile utile în `.env` pentru demo-ul de runner:
+
+- `RUNNER_IMAGE_SEMGREP`
+- `RUNNER_SCAN_CPUS`, `RUNNER_SCAN_MEMORY`, `RUNNER_SCAN_TIMEOUT_MS`
+- `RUNNER_BUILD_CPUS`, `RUNNER_BUILD_MEMORY`, `RUNNER_BUILD_TIMEOUT_MS`
+- `RUNNER_RUN_CPUS`, `RUNNER_RUN_MEMORY`, `RUNNER_RUN_TIMEOUT_MS`
+- `RUNNER_MAX_LOG_BYTES`
+- `RUNNER_SCAN_BLOCK_SEVERITY`
 
 ## Authentication
 

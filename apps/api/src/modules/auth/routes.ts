@@ -1,5 +1,6 @@
 import {
   authResponseSchema,
+  authSessionResponseSchema,
   loginRequestSchema,
   logoutResponseSchema,
   SESSION_COOKIE_NAME,
@@ -42,7 +43,9 @@ export async function registerAuthRoutes(app: FastifyInstance): Promise<void> {
     return reply.send(logoutResponseSchema.parse({ success: true }));
   });
 
-  app.get("/me", { preHandler: [app.authenticate] }, async (request) => {
-    return authResponseSchema.parse({ user: request.auth!.user });
+  app.get("/me", async (request) => {
+    return authSessionResponseSchema.parse({
+      user: request.auth?.user ?? null,
+    });
   });
 }

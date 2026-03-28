@@ -19,19 +19,16 @@ export function App(): ReactNode {
       try {
         const response = await getCurrentUser();
         if (!cancelled) {
-          setCurrentUser(response.user);
+          setCurrentUser(response.user ?? null);
           setBootstrapError(null);
         }
       } catch (error) {
         if (cancelled) return;
-        if (error instanceof ApiClientError && error.statusCode === 401) {
-          setCurrentUser(null);
-          setBootstrapError(null);
-        } else {
+        if (!(error instanceof ApiClientError && error.statusCode === 401)) {
           console.error("Failed to restore authenticated session.", error);
-          setCurrentUser(null);
           setBootstrapError("API-ul de autentificare nu răspunde momentan.");
         }
+        setCurrentUser(null);
       } finally {
         if (!cancelled) {
           setIsBootstrapping(false);
@@ -92,7 +89,12 @@ export function App(): ReactNode {
   }
 
   return (
-    <BrowserRouter>
+    <BrowserRouter
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true,
+      }}
+    >
       <Routes>
         <Route
           path="/"
@@ -106,10 +108,7 @@ export function App(): ReactNode {
         <Route
           path="/workspace/:workspaceId"
           element={
-            <WorkspaceShell
-              currentUser={currentUser}
-              onLogout={handleLogout}
-            />
+            <WorkspaceShell currentUser={currentUser} onLogout={handleLogout} />
           }
         />
         <Route path="*" element={<Navigate to="/" replace />} />

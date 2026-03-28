@@ -2,7 +2,12 @@ import {
   createRunJobBodySchema,
   createRunJobResponseSchema,
   getRunJobResponseSchema,
+  runJobStreamDoneSchema,
+  runJobStreamLogSchema,
+  runJobStreamSnapshotSchema,
   type CreateRunJobBodyDto,
+  type RunJobPublicDto,
+  type RunLogEntryDto,
 } from "@itecify/shared/runner";
 import { resolveApiBaseUrl } from "./client.js";
 
@@ -32,7 +37,9 @@ export async function createRunJob(body: CreateRunJobBodyDto) {
   if (!res.ok) {
     const errText = await res.text().catch(() => "");
     throw new Error(
-      errText ? `Rulare: ${res.status} — ${errText}` : `Rulare a eșuat (${res.status}).`,
+      errText
+        ? `Rulare: ${res.status} — ${errText}`
+        : `Rulare a eșuat (${res.status}).`,
     );
   }
   const json: unknown = await res.json();
@@ -48,4 +55,52 @@ export async function getRunJob(jobId: string) {
   }
   const json: unknown = await res.json();
   return getRunJobResponseSchema.parse(json);
+}
+
+export function subscribeRunJob(
+  jobId: string,
+  handlers: {
+    onOpen?: () => void;
+    onSnapshot?: (job: RunJobPublicDto) => void;
+    onLog?: (entry: RunLogEntryDto) => void;
+    onDone?: (job: RunJobPublicDto) => void;
+    onError?: () => void;
+  },
+): () => void {
+  const source = new EventSource(
+    joinUrl(`/jobs/${encodeURIComponent(jobId)}/stream`),
+    {
+      withCredentials: true,
+    },
+  );
+
+  source.onopen = () => {
+    handlers.onOpen?.();
+  };
+
+  source.addEventListener("snapshot", (event) => {
+    const payload: unknown = JSON.parse((event as MessageEvent<string>).data);
+    const parsed = runJobStreamSnapshotSchema.parse(payload);
+    handlers.onSnapshot?.(parsed.job);
+  });
+
+  source.addEventListener("log", (event) => {
+    const payload: unknown = JSON.parse((event as MessageEvent<string>).data);
+    const parsed = runJobStreamLogSchema.parse(payload);
+    handlers.onLog?.(parsed.entry);
+  });
+
+  source.addEventListener("done", (event) => {
+    const payload: unknown = JSON.parse((event as MessageEvent<string>).data);
+    const parsed = runJobStreamDoneSchema.parse(payload);
+    handlers.onDone?.(parsed.job);
+  });
+
+  source.onerror = () => {
+    handlers.onError?.();
+  };
+
+  return () => {
+    source.close();
+  };
 }
