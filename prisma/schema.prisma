@@ -61,9 +61,55 @@ model Workspace {
   owner   User              @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
   members WorkspaceMember[]
   runJobs RunJob[]
+  aiSuggestions AiSuggestion[]
 
   @@index([ownerId])
   @@map("workspaces")
+}
+
+enum AiSuggestionStatus {
+  /// Generare validă; așteaptă acțiune utilizator (accept/respinge).
+  VALIDATED
+  REJECTED_MALFORMED
+  /// Utilizatorul a acceptat; patch-ul a fost aplicat (stare persistată).
+  ACCEPTED
+  /// Utilizatorul a respins sugestia.
+  USER_REJECTED
+}
+
+enum AiSuggestionOperationType {
+  REPLACE
+  INSERT
+  DELETE
+}
+
+/// Propuneri AI structurate — nu se aplică automat în editor; clientul le afișează și aplică la confirmare.
+model AiSuggestion {
+  id          String @id @default(cuid())
+  batchId     String @map("batch_id")
+  workspaceId String @map("workspace_id")
+
+  status AiSuggestionStatus @map("status")
+
+  filePath        String?                   @map("file_path")
+  operationType   AiSuggestionOperationType? @map("operation_type")
+  targetRange     Json?                     @map("target_range")
+  replacementText String?                   @map("replacement_text") @db.Text
+  /// Textul din interval la momentul generării (verificare conflict la accept).
+  sourceSpanText  String?                   @map("source_span_text") @db.Text
+  explanation     String?                   @map("explanation") @db.Text
+  confidence      Float?                    @map("confidence")
+
+  parseError   String? @map("parse_error") @db.Text
+  rawCandidate Json?   @map("raw_candidate")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+  @@index([batchId])
+  @@map("ai_suggestions")
 }
 
 model WorkspaceMember {
