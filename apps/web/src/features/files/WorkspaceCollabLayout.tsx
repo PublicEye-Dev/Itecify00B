@@ -3,11 +3,16 @@ import { Link } from "react-router-dom";
 import type { UserDto } from "@itecify/shared/auth";
 import type { WorkspaceTemplateDto } from "@itecify/shared/workspaces";
 import * as Y from "yjs";
+import { CollaboratorStrip } from "../../components/collaborators/CollaboratorStrip.js";
+import { ShareLinkButton } from "../../components/share/ShareLinkButton.js";
+import { LocalPresenceBridge } from "../../features/presence/LocalPresenceBridge.js";
+import { useCollabPresencePeers } from "../../features/presence/useCollabPresencePeers.js";
 import { createRunJob, getRunJob } from "../../lib/api/jobApi.js";
 import {
   useCollabConnectionStatus,
   useWorkspaceCollab,
 } from "../../lib/collab/WorkspaceCollabProvider.js";
+import { stableHexColorForUserId } from "../../lib/collab/collabColors.js";
 import { persistWorkspaceSnapshotBlocking } from "../../lib/collab/snapshotApi.js";
 import { CollabMonacoEditor } from "../editor/CollabMonacoEditor.js";
 import { FileTree } from "./FileTree.js";
@@ -27,17 +32,35 @@ const TERMINAL_JOB_STATUSES = new Set([
 
 export function WorkspaceCollabLayout({
   workspaceId,
+  workspaceName,
+  shareToken,
   workspaceTemplate,
   currentUser,
   onLogout,
 }: {
   workspaceId: string;
+  workspaceName: string;
+  shareToken: string;
   workspaceTemplate: WorkspaceTemplateDto;
   currentUser: UserDto;
   onLogout: () => Promise<void>;
 }): ReactNode {
   const { ydoc, provider, files } = useWorkspaceCollab();
   const { wsConnected, synced } = useCollabConnectionStatus();
+  const peers = useCollabPresencePeers(provider.awareness);
+  const cursorHex = useMemo(
+    () => stableHexColorForUserId(currentUser.id),
+    [currentUser.id],
+  );
+
+  const peerFileColors = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const p of peers) {
+      if (p.isSelf || !p.activeFile) continue;
+      if (!m.has(p.activeFile)) m.set(p.activeFile, p.color);
+    }
+    return m;
+  }, [peers]);
   const paths = useYjsFilePaths(files);
   const [activePath, setActivePath] = useState<string | null>(null);
 
@@ -106,6 +129,11 @@ export function WorkspaceCollabLayout({
         fontFamily: "system-ui, sans-serif",
       }}
     >
+      <LocalPresenceBridge
+        awareness={provider.awareness}
+        displayName={currentUser.name}
+        activeFile={activePath}
+      />
       <header
         style={{
           display: "flex",
@@ -117,7 +145,15 @@ export function WorkspaceCollabLayout({
           gap: 12,
         }}
       >
-        <div style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 12 }}>
+        <div
+          style={{
+            fontWeight: 700,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+          }}
+        >
           <Link
             to="/"
             style={{ color: "#8ab4ff", textDecoration: "none", fontWeight: 500 }}
@@ -127,6 +163,7 @@ export function WorkspaceCollabLayout({
           <span>
             iTECify · <code style={{ fontSize: 12 }}>{workspaceId}</code>
           </span>
+          <ShareLinkButton shareToken={shareToken} workspaceName={workspaceName} />
         </div>
         <div
           style={{
@@ -193,6 +230,7 @@ export function WorkspaceCollabLayout({
           </button>
         </div>
       </header>
+      <CollaboratorStrip peers={peers} />
       {runnerText ? (
         <pre
           style={{
@@ -214,6 +252,7 @@ export function WorkspaceCollabLayout({
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         <FileTree
           activePath={activePath}
+          peerFileColors={peerFileColors}
           onSelect={setActivePath}
           onCreate={() => {
             const p = createUntitledFile(ydoc);
@@ -239,7 +278,8 @@ export function WorkspaceCollabLayout({
           workspaceId={workspaceId}
           activePath={activePath}
           ytext={ytext}
-          awareness={provider.awareness}
+          localUser={{ id: currentUser.id, name: currentUser.name }}
+          cursorColorHex={cursorHex}
         />
       </div>
     </div>
