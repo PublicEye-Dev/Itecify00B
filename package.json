@@ -9,9 +9,9 @@
   "scripts": {
     "dev": "pnpm --filter @itecify/shared build && pnpm -r --parallel --stream --filter \"./apps/*\" dev",
     "build": "pnpm -r run build",
-    "dev:web": "pnpm --filter @itecify/web dev",
-    "dev:api": "pnpm --filter @itecify/api dev",
-    "dev:collab": "pnpm --filter @itecify/collab dev",
+    "dev:web": "pnpm --filter @itecify/shared build && pnpm --filter @itecify/web dev",
+    "dev:api": "pnpm --filter @itecify/shared build && pnpm --filter @itecify/api dev",
+    "dev:collab": "pnpm --filter @itecify/shared build && pnpm --filter @itecify/collab dev",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",

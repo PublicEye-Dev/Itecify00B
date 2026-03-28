@@ -1,5 +1,5 @@
 import * as argon2 from "argon2";
-import type { PrismaClient } from "@prisma/client";
+import { Role, type PrismaClient } from "@prisma/client";
 import {
   type LoginRequestDto,
   type SignupRequestDto,
@@ -85,7 +85,7 @@ export async function signupWithPassword(
         email: normalizedEmail,
         name: normalizedName,
         passwordHash,
-        role: "EDITOR",
+        role: Role.EDITOR,
       },
     });
   } catch (error) {
@@ -116,10 +116,13 @@ export async function loginWithPassword(
     throw new HttpError(401, "Invalid email or password.");
   }
 
-  const isValidPassword = await argon2.verify(
-    user.passwordHash,
-    input.password,
-  );
+  let isValidPassword = false;
+  try {
+    isValidPassword = await argon2.verify(user.passwordHash, input.password);
+  } catch {
+    /** Hash corupt / alt algoritm — nu expunem detalii; același răspuns ca parolă greșită. */
+    throw new HttpError(401, "Invalid email or password.");
+  }
   if (!isValidPassword) {
     throw new HttpError(401, "Invalid email or password.");
   }

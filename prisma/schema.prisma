@@ -13,14 +13,17 @@ enum Role {
 }
 
 model User {
-  id           String    @id @default(uuid())
-  email        String    @unique
+  id           String   @id @default(uuid())
+  email        String   @unique
   name         String
   passwordHash String
-  role         Role      @default(EDITOR)
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  role         Role     @default(EDITOR)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
   sessions     Session[]
+
+  ownedWorkspaces      Workspace[]         @relation("WorkspaceOwner")
+  workspaceMemberships WorkspaceMember[]
 
   @@index([role])
 }
@@ -36,4 +39,82 @@ model Session {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+enum WorkspaceMemberRole {
+  OWNER
+  EDITOR
+}
+
+model Workspace {
+  id                String            @id @default(cuid())
+  name              String
+  ownerId           String            @map("owner_id")
+  template          RunTemplate
+  shareToken        String            @unique @map("share_token")
+  /// Ultimul snapshot Yjs serializat ca JSON (`WorkspaceSnapshotV1` sau obiect compatibil).
+  snapshot          Json?
+  snapshotUpdatedAt DateTime?         @map("snapshot_updated_at")
+  createdAt         DateTime          @default(now()) @map("created_at")
+  updatedAt         DateTime          @updatedAt @map("updated_at")
+
+  owner   User              @relation("WorkspaceOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  members WorkspaceMember[]
+  runJobs RunJob[]
+
+  @@index([ownerId])
+  @@map("workspaces")
+}
+
+model WorkspaceMember {
+  workspaceId String                @map("workspace_id")
+  userId      String                @map("user_id")
+  role        WorkspaceMemberRole   @default(EDITOR)
+  createdAt   DateTime              @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, userId])
+  @@map("workspace_members")
+}
+
+enum RunTemplate {
+  javascript
+  python
+  java
+  c
+}
+
+enum RunJobStatus {
+  PENDING
+  MATERIALIZING
+  BUILDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  TIMEOUT
+  CANCELLED
+}
+
+model RunJob {
+  id           String       @id @default(cuid())
+  workspaceId  String       @map("workspace_id")
+  workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  template     RunTemplate
+  status       RunJobStatus @default(PENDING)
+  exitCode     Int?         @map("exit_code")
+  errorCode    String?      @map("error_code")
+  errorMessage String?      @map("error_message") @db.Text
+  stdout       String       @default("") @db.Text
+  stderr       String       @default("") @db.Text
+  workDir      String?      @map("work_dir")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  startedAt    DateTime?    @map("started_at")
+  finishedAt   DateTime?    @map("finished_at")
+
+  @@index([workspaceId])
+  @@index([status])
+  @@map("run_jobs")
 }

@@ -2,10 +2,12 @@ import "./env.js";
 import process from "node:process";
 import cors from "@fastify/cors";
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import { Prisma } from "@prisma/client";
 import { createHealthPayload } from "@itecify/shared";
 import { ZodError } from "zod";
 import { HttpError, toErrorDto, toFieldErrors } from "./modules/auth/errors.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
+import { registerJobRoutes } from "./modules/jobs/job.routes.js";
 import { registerWorkspaceRoutes } from "./modules/workspaces/routes.js";
 import { registerAuthPlugin } from "./plugins/auth.js";
 import { registerPrismaPlugin } from "./plugins/prisma.js";
@@ -39,7 +41,14 @@ export async function buildApp() {
           .send(toErrorDto("Invalid request payload.", toFieldErrors(error)));
       }
 
-      request.log.error(error);
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        request.log.error(
+          { err: error, code: error.code, meta: error.meta },
+          "Prisma error",
+        );
+      } else {
+        request.log.error(error);
+      }
       return reply.code(500).send(toErrorDto("Internal server error."));
     },
   );
@@ -47,6 +56,7 @@ export async function buildApp() {
   app.get("/health", async () => createHealthPayload("api"));
   await app.register(registerAuthRoutes, { prefix: "/auth" });
   await app.register(registerWorkspaceRoutes);
+  await app.register(registerJobRoutes);
 
   return app;
 }

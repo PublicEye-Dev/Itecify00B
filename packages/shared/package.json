@@ -15,6 +15,14 @@
     "./collab": {
       "types": "./dist/collab/index.d.ts",
       "import": "./dist/collab/index.js"
+    },
+    "./runner": {
+      "types": "./dist/runner/index.d.ts",
+      "import": "./dist/runner/index.js"
+    },
+    "./workspaces": {
+      "types": "./dist/workspaces/index.d.ts",
+      "import": "./dist/workspaces/index.js"
     }
   },
   "types": "./dist/index.d.ts",

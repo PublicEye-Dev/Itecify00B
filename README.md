@@ -81,13 +81,18 @@ WebSocket Yjs: `ws://localhost:1234` (același server ca health-ul de mai sus).
 
 ### Editor colaborativ (Yjs + Monaco)
 
-- Deschide același workspace în două taburi: același query `?workspace=demo` (implicit `default`).
+- Din dashboard, **Deschide** același workspace în două taburi folosind aceeași rută `/workspace/:id` (ID-ul din listă).
 - **Room / workspace:** numele room-ului pentru `WebsocketProvider` este `workspaceId` (trebuie identic în toate taburile).
 - **Forma documentului:** într-un `Y.Doc` există un singur `Y.Map` la cheia `files` (vezi `packages/shared/src/collab`). Fiecare cheie este calea fișierului, valoarea este `Y.Text`.
-- **Seed / snapshot:** la deschidere, clientul cere `GET /workspaces/:id/snapshot` pe API; dacă primește update Yjs, aplică `Y.applyUpdate` **înainte** de conexiunea WebSocket. După editări, un `PUT` debounced persistă `encodeStateAsUpdate` în memorie (API stub).
-- **Reconnect:** `y-websocket` reconectează automat socket-ul; după reconectare, starea se realiniază din documentul partajat. Dacă nu există alt peer online și serverul collab e in-memory, ultima stare vine din snapshot-ul salvat pe API sau din bootstrap (`README.md` în map dacă e gol).
+- **Seed / snapshot:** la deschidere, clientul cere `GET /workspaces/:id/snapshot`; dacă primește update Yjs, aplică `Y.applyUpdate` **înainte** de WebSocket. După editări, `PUT` debounced persistă starea în coloana `workspaces.snapshot` (JSONB). Dacă nu există snapshot, serverul returnează `{ version: 1, update: [] }` și clientul face bootstrap minim (`README.md`) sau folosește template-ul creat la `POST /workspaces`.
+- **Reconnect:** `y-websocket` reconectează automat. Folosește **`http://localhost:5173`** (și același host pentru API/collab), nu amesteca `127.0.0.1` cu `localhost`: cookie-ul de sesiune poate să nu fie trimis la handshake-ul WebSocket pe alt „site”.
 
 Variabile utile în `.env`: `VITE_API_URL`, `VITE_COLLAB_WS_URL`.
+
+### Runner Docker (Phase 1)
+
+- În editor, butonul **Rulează (template) în Docker** salvează snapshot-ul, apoi `POST /jobs` și afișează stdout/stderr când job-ul ajunge într-o stare terminală.
+- Necesită **Docker Desktop** (sau daemon compatibil) și prima rulare poate descărca imaginile din `apps/api/src/modules/runtime-templates/recipes.ts`.
 
 ## Authentication
 
