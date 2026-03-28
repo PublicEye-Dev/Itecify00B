@@ -8,12 +8,15 @@ export function FileTree({
   onCreate,
   onRename,
   onDelete,
+  /** Culoare indicator pentru fiecare fișier deschis de alt colaborator (nu tu). */
+  peerFileColors,
 }: {
   activePath: string | null;
   onSelect: (path: string) => void;
   onCreate: () => void;
   onRename: (path: string) => void;
   onDelete: (path: string) => void;
+  peerFileColors?: Map<string, string>;
 }): ReactNode {
   const { files } = useWorkspaceCollab();
   const paths = useYjsFilePaths(files);
@@ -62,6 +65,21 @@ export function FileTree({
         {paths.map((p) => (
           <li key={p} style={{ marginBottom: 4 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              {peerFileColors?.has(p) ? (
+                <span
+                  title="Alt colaborator are acest fișier deschis"
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 999,
+                    background: peerFileColors.get(p),
+                    flexShrink: 0,
+                    boxShadow: `0 0 0 1px rgba(0,0,0,0.4)`,
+                  }}
+                />
+              ) : (
+                <span style={{ width: 8, flexShrink: 0 }} />
+              )}
               <button
                 type="button"
                 onClick={() => {

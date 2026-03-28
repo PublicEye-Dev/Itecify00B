@@ -1,13 +1,28 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import type { AiSuggestionPersisted, TargetRange } from "@itecify/shared/ai";
 import type { UserDto } from "@itecify/shared/auth";
 import type { WorkspaceTemplateDto } from "@itecify/shared/workspaces";
+import { Link } from "react-router-dom";
 import * as Y from "yjs";
+import { CollaboratorStrip } from "../../components/collaborators/CollaboratorStrip.js";
+import { ShareLinkButton } from "../../components/share/ShareLinkButton.js";
+import { AiSuggestionsSidebar } from "../../features/ai/AiSuggestionsSidebar.js";
+import { LocalPresenceBridge } from "../../features/presence/LocalPresenceBridge.js";
+import { useCollabPresencePeers } from "../../features/presence/useCollabPresencePeers.js";
 import {
   useCollabConnectionStatus,
   useWorkspaceCollab,
 } from "../../lib/collab/WorkspaceCollabProvider.js";
+import { stableHexColorForUserId } from "../../lib/collab/collabColors.js";
 import { persistWorkspaceSnapshotBlocking } from "../../lib/collab/snapshotApi.js";
+import { useWorkspaceAiPresence } from "../../lib/collab/useWorkspaceAiPresence.js";
 import { CollabMonacoEditor } from "../editor/CollabMonacoEditor.js";
 import { RunPanel } from "../run/RunPanel.js";
 import { useWorkspaceRun } from "../run/useWorkspaceRun.js";
@@ -21,19 +36,30 @@ import { useYjsFilePaths } from "./useYjsFilePaths.js";
 
 export function WorkspaceCollabLayout({
   workspaceId,
+  workspaceName,
+  shareToken,
   workspaceTemplate,
   currentUser,
   onLogout,
 }: {
   workspaceId: string;
+  workspaceName: string;
+  shareToken: string;
   workspaceTemplate: WorkspaceTemplateDto;
   currentUser: UserDto;
   onLogout: () => Promise<void>;
 }): ReactNode {
   const { ydoc, provider, files } = useWorkspaceCollab();
-  const { wsConnected, synced } = useCollabConnectionStatus();
-  const paths = useYjsFilePaths(files);
   const [activePath, setActivePath] = useState<string | null>(null);
+  const [pendingSuggestions, setPendingSuggestions] = useState<
+    AiSuggestionPersisted[]
+  >([]);
+  const [revealRequest, setRevealRequest] = useState<{
+    range: TargetRange;
+    key: number;
+  } | null>(null);
+  const revealKeyRef = useRef(0);
+  const paths = useYjsFilePaths(files);
 
   useEffect(() => {
     if (paths.length === 0) {
@@ -45,10 +71,53 @@ export function WorkspaceCollabLayout({
     }
   }, [paths, activePath, files]);
 
+  const handleReveal = useCallback((filePath: string, range: TargetRange) => {
+    setActivePath(filePath);
+    revealKeyRef.current += 1;
+    setRevealRequest({ range, key: revealKeyRef.current });
+  }, []);
+
+  const clearReveal = useCallback(() => setRevealRequest(null), []);
+  const { wsConnected, synced } = useCollabConnectionStatus();
+  const peers = useCollabPresencePeers(provider.awareness);
+  const {
+    presence: aiPresence,
+    send: sendAiPresence,
+    wsConnected: aiPresenceWs,
+  } = useWorkspaceAiPresence(workspaceId);
+  const cursorHex = useMemo(
+    () => stableHexColorForUserId(currentUser.id),
+    [currentUser.id],
+  );
+
+  const peerFileColors = useMemo(() => {
+    const next = new Map<string, string>();
+    for (const peer of peers) {
+      if (peer.isSelf || !peer.activeFile) continue;
+      if (!next.has(peer.activeFile)) {
+        next.set(peer.activeFile, peer.color);
+      }
+    }
+    return next;
+  }, [peers]);
+
   const ytext = useMemo(
     () => (activePath ? (files.get(activePath) ?? null) : null),
     [activePath, files],
   );
+
+  const aiDecorationRanges = useMemo(() => {
+    return pendingSuggestions
+      .filter(
+        (suggestion) =>
+          suggestion.filePath === activePath && suggestion.targetRange,
+      )
+      .map((suggestion) => ({
+        id: suggestion.id,
+        range: suggestion.targetRange!,
+      }));
+  }, [pendingSuggestions, activePath]);
+
   const runner = useWorkspaceRun({
     workspaceId,
     template: workspaceTemplate,
@@ -71,6 +140,11 @@ export function WorkspaceCollabLayout({
         fontFamily: "system-ui, sans-serif",
       }}
     >
+      <LocalPresenceBridge
+        awareness={provider.awareness}
+        displayName={currentUser.name}
+        activeFile={activePath}
+      />
       <header
         style={{
           display: "flex",
@@ -88,6 +162,7 @@ export function WorkspaceCollabLayout({
             display: "flex",
             alignItems: "center",
             gap: 12,
+            flexWrap: "wrap",
           }}
         >
           <Link
@@ -103,6 +178,10 @@ export function WorkspaceCollabLayout({
           <span>
             iTECify · <code style={{ fontSize: 12 }}>{workspaceId}</code>
           </span>
+          <ShareLinkButton
+            shareToken={shareToken}
+            workspaceName={workspaceName}
+          />
         </div>
         <div
           style={{
@@ -151,6 +230,9 @@ export function WorkspaceCollabLayout({
           </button>
         </div>
       </header>
+
+      <CollaboratorStrip peers={peers} aiPresence={aiPresence} />
+
       <div
         style={{
           display: "flex",
@@ -162,10 +244,11 @@ export function WorkspaceCollabLayout({
         <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
           <FileTree
             activePath={activePath}
+            peerFileColors={peerFileColors}
             onSelect={setActivePath}
             onCreate={() => {
-              const p = createUntitledFile(ydoc);
-              setActivePath(p);
+              const path = createUntitledFile(ydoc);
+              setActivePath(path);
             }}
             onRename={(path) => {
               const next = window.prompt("Cale nouă (ex: src/main.ts)", path);
@@ -187,9 +270,26 @@ export function WorkspaceCollabLayout({
             workspaceId={workspaceId}
             activePath={activePath}
             ytext={ytext}
-            awareness={provider.awareness}
+            localUser={{ id: currentUser.id, name: currentUser.name }}
+            cursorColorHex={cursorHex}
+            aiDecorationRanges={aiDecorationRanges}
+            revealRequest={revealRequest}
+            onRevealHandled={clearReveal}
+          />
+          <AiSuggestionsSidebar
+            workspaceId={workspaceId}
+            currentUserId={currentUser.id}
+            activePath={activePath}
+            setActivePath={setActivePath}
+            files={files}
+            ydoc={ydoc}
+            sendAiPresence={sendAiPresence}
+            aiPresenceChannelReady={aiPresenceWs}
+            onPendingChange={setPendingSuggestions}
+            onRequestReveal={handleReveal}
           />
         </div>
+
         <RunPanel
           job={runner.job}
           liveLogs={runner.liveLogs}

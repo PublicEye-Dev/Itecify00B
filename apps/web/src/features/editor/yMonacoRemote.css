@@ -1,0 +1,33 @@
+/* Sugestii AI în așteptare (Prompt 7) — distinct de textul uman. */
+.monaco-editor .itecify-ai-suggestion-range {
+  background-color: rgba(124, 58, 237, 0.16) !important;
+  border-bottom: 2px solid rgba(167, 139, 250, 0.65) !important;
+  box-sizing: border-box;
+}
+
+/* Cursori remote JSON (Prompt 5) + prezență AI. */
+.monaco-editor .itecify-json-remote-sel {
+  box-sizing: border-box;
+  border-radius: 2px;
+}
+
+@keyframes itecifyAiPulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.75;
+  }
+}
+
+.itecify-ai-pulse-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #f5f3ff;
+  box-shadow: 0 0 12px rgba(167, 139, 250, 0.9);
+  animation: itecifyAiPulse 2s ease-in-out infinite;
+}

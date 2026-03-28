@@ -27,6 +27,10 @@
     "./workspaces": {
       "types": "./dist/workspaces/index.d.ts",
       "import": "./dist/workspaces/index.js"
+    },
+    "./ai": {
+      "types": "./dist/ai/index.d.ts",
+      "import": "./dist/ai/index.js"
     }
   },
   "types": "./dist/index.d.ts",
