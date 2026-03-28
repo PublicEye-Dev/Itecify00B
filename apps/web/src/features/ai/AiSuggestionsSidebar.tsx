@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import * as Y from "yjs";
 import type { Map as YMap, Text as YText } from "yjs";
 import type { TargetRange } from "@itecify/shared/ai";
@@ -27,6 +34,7 @@ export function AiSuggestionsSidebar({
   aiPresenceChannelReady,
   onPendingChange,
   onRequestReveal,
+  style,
 }: {
   workspaceId: string;
   currentUserId: string;
@@ -38,6 +46,7 @@ export function AiSuggestionsSidebar({
   aiPresenceChannelReady: boolean;
   onPendingChange?: (rows: AiSuggestionPersisted[]) => void;
   onRequestReveal: (filePath: string, range: TargetRange) => void;
+  style?: CSSProperties;
 }): ReactNode {
   const [instruction, setInstruction] = useState(
     "Îmbunătățește claritatea și adaugă un comentariu scurt la începutul fișierului.",
@@ -169,7 +178,8 @@ export function AiSuggestionsSidebar({
 
     const fileText = ytext.toString();
     const conflict =
-      !force && hasSuggestionConflict(fileText, s.targetRange, s.sourceSpanText);
+      !force &&
+      hasSuggestionConflict(fileText, s.targetRange, s.sourceSpanText);
     if (conflict) {
       setConflictIds((prev) => new Set(prev).add(id));
       return;
@@ -203,12 +213,15 @@ export function AiSuggestionsSidebar({
     <aside
       style={{
         width: 360,
+        height: "100%",
+        minWidth: 0,
         flexShrink: 0,
         display: "flex",
         flexDirection: "column",
         borderLeft: "1px solid #2a3340",
         background: "linear-gradient(180deg, #141820 0%, #0d1117 100%)",
         minHeight: 0,
+        ...style,
       }}
     >
       <div

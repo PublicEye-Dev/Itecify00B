@@ -135,6 +135,8 @@ enum RunTemplate {
 enum RunJobStatus {
   PENDING
   MATERIALIZING
+  SCANNING
+  BLOCKED
   BUILDING
   RUNNING
   SUCCEEDED
@@ -149,6 +151,9 @@ model RunJob {
   workspace    Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   template     RunTemplate
   status       RunJobStatus @default(PENDING)
+  scanReport   Json?        @map("scan_report")
+  runPolicy    Json?        @map("run_policy")
+  logStats     Json?        @map("log_stats")
   exitCode     Int?         @map("exit_code")
   errorCode    String?      @map("error_code")
   errorMessage String?      @map("error_message") @db.Text

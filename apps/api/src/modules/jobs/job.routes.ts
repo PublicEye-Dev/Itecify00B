@@ -1,6 +1,9 @@
 import {
   createRunJobBodySchema,
   getRunJobResponseSchema,
+  runJobStreamDoneSchema,
+  runJobStreamLogSchema,
+  runJobStreamSnapshotSchema,
 } from "@itecify/shared/runner";
 import type { FastifyInstance } from "fastify";
 import { HttpError } from "../auth/errors.js";
@@ -58,59 +61,116 @@ export async function registerJobRoutes(app: FastifyInstance): Promise<void> {
         job.workspaceId,
       );
 
+      const lastEventIdRaw = request.headers["last-event-id"];
+      const lastEventId = Number(
+        Array.isArray(lastEventIdRaw)
+          ? lastEventIdRaw[0]
+          : (lastEventIdRaw ?? "0"),
+      );
+
+      const requestOrigin = Array.isArray(request.headers.origin)
+        ? request.headers.origin[0]
+        : request.headers.origin;
+
       reply.hijack();
-      reply.raw.writeHead(200, {
+      const headers: Record<string, string> = {
         "Content-Type": "text/event-stream; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
         Connection: "keep-alive",
         "X-Accel-Buffering": "no",
-      });
+        Vary: "Origin",
+      };
 
-      const writeEvent = (event: string, payload: unknown): void => {
+      if (requestOrigin) {
+        headers["Access-Control-Allow-Origin"] = requestOrigin;
+        headers["Access-Control-Allow-Credentials"] = "true";
+      }
+
+      reply.raw.writeHead(200, headers);
+      reply.raw.write("retry: 1500\n\n");
+      reply.raw.flushHeaders?.();
+
+      let closed = false;
+
+      const writeEvent = (
+        event: string,
+        payload: unknown,
+        id?: number,
+      ): void => {
+        if (closed) return;
+        if (id != null) {
+          reply.raw.write(`id: ${id}\n`);
+        }
         reply.raw.write(`event: ${event}\n`);
         reply.raw.write(`data: ${JSON.stringify(payload)}\n\n`);
       };
 
-      writeEvent("snapshot", {
-        status: job.status,
-        stdout: job.stdout,
-        stderr: job.stderr,
-      });
+      const initialJob = toRunJobPublicDto(job);
+      writeEvent(
+        "snapshot",
+        runJobStreamSnapshotSchema.parse({ job: initialJob }),
+      );
 
-      for (const ev of getRecentJobLogs(job.id)) {
-        writeEvent("log", ev);
+      if (lastEventId > 0) {
+        for (const ev of getRecentJobLogs(job.id, lastEventId)) {
+          writeEvent(
+            "log",
+            runJobStreamLogSchema.parse({ entry: ev }),
+            ev.sequence,
+          );
+        }
       }
 
       if (isTerminalStatus(job.status)) {
-        writeEvent("done", { status: job.status, exitCode: job.exitCode });
+        writeEvent("done", runJobStreamDoneSchema.parse({ job: initialJob }));
         reply.raw.end();
         return;
       }
 
       const unsubscribe = subscribeJobLogs(job.id, (ev) => {
-        writeEvent("log", ev);
+        if (ev.type === "log") {
+          writeEvent(
+            "log",
+            runJobStreamLogSchema.parse({ entry: ev.entry }),
+            ev.sequence,
+          );
+          return;
+        }
+
+        writeEvent(
+          "snapshot",
+          runJobStreamSnapshotSchema.parse({ job: ev.job }),
+          ev.sequence,
+        );
+
+        if (isTerminalStatus(ev.job.status)) {
+          writeEvent(
+            "done",
+            runJobStreamDoneSchema.parse({ job: ev.job }),
+            ev.sequence,
+          );
+          cleanup();
+        }
       });
 
-      const poll = setInterval(() => {
-        void (async () => {
-          const j = await getJobById(app.prisma, job.id);
-          if (j && isTerminalStatus(j.status)) {
-            writeEvent("snapshot", {
-              status: j.status,
-              stdout: j.stdout,
-              stderr: j.stderr,
-            });
-            writeEvent("done", { status: j.status, exitCode: j.exitCode });
-            clearInterval(poll);
-            unsubscribe();
-            reply.raw.end();
-          }
-        })();
-      }, 500);
+      const heartbeat = setInterval(() => {
+        if (!closed) {
+          reply.raw.write(": keep-alive\n\n");
+        }
+      }, 15000);
+
+      const cleanup = (): void => {
+        if (closed) return;
+        closed = true;
+        clearInterval(heartbeat);
+        unsubscribe();
+        reply.raw.end();
+      };
 
       request.raw.on("close", () => {
-        clearInterval(poll);
+        clearInterval(heartbeat);
         unsubscribe();
+        closed = true;
       });
     },
   );

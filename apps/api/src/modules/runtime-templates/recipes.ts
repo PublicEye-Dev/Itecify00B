@@ -4,7 +4,8 @@ export type RuntimeRecipe = {
   template: RunTemplateDto;
   requiredEntry: string;
   dockerImage: string;
-  shellScript: string;
+  buildScript: string | null;
+  runScript: string;
 };
 
 /**
@@ -16,7 +17,8 @@ export const RUNTIME_RECIPES: Record<RunTemplateDto, RuntimeRecipe> = {
     template: "javascript",
     requiredEntry: "main.js",
     dockerImage: process.env.RUNNER_IMAGE_JS ?? "node:20-alpine",
-    shellScript: `set -eu
+    buildScript: null,
+    runScript: `set -eu
 node main.js
 `,
   },
@@ -24,26 +26,36 @@ node main.js
     template: "python",
     requiredEntry: "main.py",
     dockerImage: process.env.RUNNER_IMAGE_PYTHON ?? "python:3.12-alpine",
-    shellScript: `set -eu
+    buildScript: null,
+    runScript: `set -eu
 python main.py
 `,
   },
   java: {
     template: "java",
     requiredEntry: "Main.java",
-    dockerImage: process.env.RUNNER_IMAGE_JAVA ?? "eclipse-temurin:17-jdk-jammy",
-    shellScript: `set -eu
-javac -encoding UTF-8 Main.java
-java Main
+    dockerImage:
+      process.env.RUNNER_IMAGE_JAVA ?? "eclipse-temurin:17-jdk-jammy",
+    buildScript: `set -eu
+rm -rf .itecify-build
+mkdir -p .itecify-build
+javac -encoding UTF-8 -d .itecify-build Main.java
+`,
+    runScript: `set -eu
+java -cp .itecify-build Main
 `,
   },
   c: {
     template: "c",
     requiredEntry: "main.c",
     dockerImage: process.env.RUNNER_IMAGE_C ?? "gcc:14-bookworm",
-    shellScript: `set -eu
-gcc -O2 -std=c11 -Wall -Wextra -o /tmp/a.out main.c
-/tmp/a.out
+    buildScript: `set -eu
+rm -rf .itecify-build
+mkdir -p .itecify-build
+gcc -O2 -std=c11 -Wall -Wextra -o .itecify-build/a.out main.c
+`,
+    runScript: `set -eu
+./.itecify-build/a.out
 `,
   },
 };

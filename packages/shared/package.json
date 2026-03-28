@@ -20,6 +20,10 @@
       "types": "./dist/runner/index.d.ts",
       "import": "./dist/runner/index.js"
     },
+    "./run": {
+      "types": "./dist/run/index.d.ts",
+      "import": "./dist/run/index.js"
+    },
     "./workspaces": {
       "types": "./dist/workspaces/index.d.ts",
       "import": "./dist/workspaces/index.js"

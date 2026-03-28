@@ -1,12 +1,21 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
 
+export type DockerRunLimits = {
+  cpus: string;
+  memory: string;
+};
+
 export type DockerRunOpts = {
   workDirHost: string;
   image: string;
-  shellScript: string;
+  command: string[];
   label: string;
+  containerName: string;
   timeoutMs: number;
+  limits: DockerRunLimits;
+  mountMode?: "ro" | "rw";
+  network?: string;
   onStdout: (chunk: string) => void;
   onStderr: (chunk: string) => void;
 };
@@ -15,28 +24,42 @@ function dockerBin(): string {
   return process.env.DOCKER_BIN ?? "docker";
 }
 
+async function forceRemoveContainer(containerName: string): Promise<void> {
+  await new Promise<void>((resolve) => {
+    const child = spawn(dockerBin(), ["rm", "-f", containerName], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+
+    child.on("error", () => resolve());
+    child.on("close", () => resolve());
+  });
+}
+
 /** Execuție doar în container; host-ul doar invocă CLI-ul Docker. */
-export async function runInDocker(opts: DockerRunOpts): Promise<{ exitCode: number | null }> {
+export async function runInDocker(
+  opts: DockerRunOpts,
+): Promise<{ exitCode: number | null }> {
   const args = [
     "run",
     "--rm",
+    "--name",
+    opts.containerName,
     "-i",
     "--network",
-    "none",
+    opts.network ?? "none",
     "--memory",
-    process.env.RUNNER_DOCKER_MEMORY ?? "256m",
+    opts.limits.memory,
     "--cpus",
-    process.env.RUNNER_DOCKER_CPUS ?? "1",
+    opts.limits.cpus,
     "-v",
-    `${opts.workDirHost}:/workspace:rw`,
+    `${opts.workDirHost}:/workspace:${opts.mountMode ?? "rw"}`,
     "-w",
     "/workspace",
     "--label",
     opts.label,
     opts.image,
-    "sh",
-    "-c",
-    opts.shellScript,
+    ...opts.command,
   ];
 
   return await new Promise((resolve, reject) => {
@@ -50,8 +73,10 @@ export async function runInDocker(opts: DockerRunOpts): Promise<{ exitCode: numb
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill("SIGKILL");
-      reject(new Error("TIMEOUT"));
+      void forceRemoveContainer(opts.containerName).finally(() => {
+        child.kill("SIGKILL");
+        reject(new Error("TIMEOUT"));
+      });
     }, opts.timeoutMs);
 
     const onData =

@@ -28,11 +28,17 @@ export const userDtoSchema = z.object({
   createdAt: z
     .string()
     .min(1)
-    .refine((s) => !Number.isNaN(Date.parse(s)), { message: "Invalid createdAt" }),
+    .refine((s) => !Number.isNaN(Date.parse(s)), {
+      message: "Invalid createdAt",
+    }),
 });
 
 export const authResponseSchema = z.object({
   user: userDtoSchema,
+});
+
+export const authSessionResponseSchema = z.object({
+  user: userDtoSchema.nullable(),
 });
 
 export const logoutResponseSchema = z.object({
@@ -49,5 +55,6 @@ export type SignupRequestDto = z.infer<typeof signupRequestSchema>;
 export type LoginRequestDto = z.infer<typeof loginRequestSchema>;
 export type UserDto = z.infer<typeof userDtoSchema>;
 export type AuthResponseDto = z.infer<typeof authResponseSchema>;
+export type AuthSessionResponseDto = z.infer<typeof authSessionResponseSchema>;
 export type LogoutResponseDto = z.infer<typeof logoutResponseSchema>;
 export type ApiErrorDto = z.infer<typeof apiErrorSchema>;
