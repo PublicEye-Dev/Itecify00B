@@ -4,7 +4,9 @@ export type HealthResponse = {
   timestamp: string;
 };
 
-export function createHealthPayload(service: HealthResponse["service"]): HealthResponse {
+export function createHealthPayload(
+  service: HealthResponse["service"],
+): HealthResponse {
   return {
     status: "ok",
     service,
@@ -12,4 +14,5 @@ export function createHealthPayload(service: HealthResponse["service"]): HealthR
   };
 }
 
+export * from "./auth/index.js";
 export * from "./collab/index.js";

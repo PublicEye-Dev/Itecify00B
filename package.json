@@ -15,10 +15,15 @@
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
+    "db:seed": "prisma db seed",
     "db:studio": "prisma studio"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.mjs"
   },
   "devDependencies": {
     "@prisma/client": "^6.6.0",
+    "argon2": "^0.41.1",
     "prisma": "^6.6.0",
     "typescript": "~5.8.3"
   }
