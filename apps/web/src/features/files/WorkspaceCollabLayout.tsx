@@ -4,6 +4,8 @@ import {
   useMemo,
   useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import type { AiSuggestionPersisted, TargetRange } from "@itecify/shared/ai";
@@ -34,6 +36,19 @@ import {
 } from "./workspaceFileOps.js";
 import { useYjsFilePaths } from "./useYjsFilePaths.js";
 
+const LEFT_PANEL_DEFAULT_WIDTH = 260;
+const LEFT_PANEL_MIN_WIDTH = 180;
+const RIGHT_PANEL_DEFAULT_WIDTH = 360;
+const RIGHT_PANEL_MIN_WIDTH = 260;
+const CENTER_PANEL_MIN_WIDTH = 360;
+const RUN_PANEL_DEFAULT_HEIGHT = 320;
+const RUN_PANEL_MIN_HEIGHT = 220;
+const TOP_SECTION_MIN_HEIGHT = 220;
+const HANDLE_SIZE = 10;
+const KEYBOARD_RESIZE_STEP = 24;
+
+type ResizeHandleKind = "left" | "right" | "bottom";
+
 export function WorkspaceCollabLayout({
   workspaceId,
   workspaceName,
@@ -50,6 +65,22 @@ export function WorkspaceCollabLayout({
   onLogout: () => Promise<void>;
 }): ReactNode {
   const { ydoc, provider, files } = useWorkspaceCollab();
+  const panelStorageKey = useMemo(
+    () => `itecify:workspace-layout:${workspaceId}`,
+    [workspaceId],
+  );
+  const [leftPanelWidth, setLeftPanelWidth] = useStoredPanelSize(
+    `${panelStorageKey}:files`,
+    LEFT_PANEL_DEFAULT_WIDTH,
+  );
+  const [rightPanelWidth, setRightPanelWidth] = useStoredPanelSize(
+    `${panelStorageKey}:ai`,
+    RIGHT_PANEL_DEFAULT_WIDTH,
+  );
+  const [runPanelHeight, setRunPanelHeight] = useStoredPanelSize(
+    `${panelStorageKey}:run`,
+    RUN_PANEL_DEFAULT_HEIGHT,
+  );
   const [activePath, setActivePath] = useState<string | null>(null);
   const [pendingSuggestions, setPendingSuggestions] = useState<
     AiSuggestionPersisted[]
@@ -58,8 +89,240 @@ export function WorkspaceCollabLayout({
     range: TargetRange;
     key: number;
   } | null>(null);
+  const [draggingHandle, setDraggingHandle] = useState<ResizeHandleKind | null>(
+    null,
+  );
   const revealKeyRef = useRef(0);
+  const dragCleanupRef = useRef<(() => void) | null>(null);
+  const layoutBodyRef = useRef<HTMLDivElement | null>(null);
+  const topRowRef = useRef<HTMLDivElement | null>(null);
   const paths = useYjsFilePaths(files);
+
+  const getTopRowWidth = useCallback(() => {
+    if (topRowRef.current) {
+      return topRowRef.current.clientWidth;
+    }
+    return window.innerWidth;
+  }, []);
+
+  const getLayoutBodyHeight = useCallback(() => {
+    if (layoutBodyRef.current) {
+      return layoutBodyRef.current.clientHeight;
+    }
+    return window.innerHeight;
+  }, []);
+
+  const getMaxLeftPanelWidth = useCallback(() => {
+    const maxWidth =
+      getTopRowWidth() -
+      rightPanelWidth -
+      CENTER_PANEL_MIN_WIDTH -
+      HANDLE_SIZE * 2;
+    return Math.max(LEFT_PANEL_MIN_WIDTH, maxWidth);
+  }, [getTopRowWidth, rightPanelWidth]);
+
+  const getMaxRightPanelWidth = useCallback(() => {
+    const maxWidth =
+      getTopRowWidth() -
+      leftPanelWidth -
+      CENTER_PANEL_MIN_WIDTH -
+      HANDLE_SIZE * 2;
+    return Math.max(RIGHT_PANEL_MIN_WIDTH, maxWidth);
+  }, [getTopRowWidth, leftPanelWidth]);
+
+  const getMaxRunPanelHeight = useCallback(() => {
+    const maxHeight =
+      getLayoutBodyHeight() - TOP_SECTION_MIN_HEIGHT - HANDLE_SIZE;
+    return Math.max(RUN_PANEL_MIN_HEIGHT, maxHeight);
+  }, [getLayoutBodyHeight]);
+
+  const updateLeftPanelWidth = useCallback(
+    (nextWidth: number) => {
+      setLeftPanelWidth(
+        clamp(nextWidth, LEFT_PANEL_MIN_WIDTH, getMaxLeftPanelWidth()),
+      );
+    },
+    [getMaxLeftPanelWidth, setLeftPanelWidth],
+  );
+
+  const updateRightPanelWidth = useCallback(
+    (nextWidth: number) => {
+      setRightPanelWidth(
+        clamp(nextWidth, RIGHT_PANEL_MIN_WIDTH, getMaxRightPanelWidth()),
+      );
+    },
+    [getMaxRightPanelWidth, setRightPanelWidth],
+  );
+
+  const updateRunPanelHeight = useCallback(
+    (nextHeight: number) => {
+      setRunPanelHeight(
+        clamp(nextHeight, RUN_PANEL_MIN_HEIGHT, getMaxRunPanelHeight()),
+      );
+    },
+    [getMaxRunPanelHeight, setRunPanelHeight],
+  );
+
+  useEffect(() => {
+    return () => {
+      dragCleanupRef.current?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    const clampPanelSizes = () => {
+      setLeftPanelWidth((current) =>
+        clamp(current, LEFT_PANEL_MIN_WIDTH, getMaxLeftPanelWidth()),
+      );
+      setRightPanelWidth((current) =>
+        clamp(current, RIGHT_PANEL_MIN_WIDTH, getMaxRightPanelWidth()),
+      );
+      setRunPanelHeight((current) =>
+        clamp(current, RUN_PANEL_MIN_HEIGHT, getMaxRunPanelHeight()),
+      );
+    };
+
+    clampPanelSizes();
+    window.addEventListener("resize", clampPanelSizes);
+    return () => {
+      window.removeEventListener("resize", clampPanelSizes);
+    };
+  }, [
+    getMaxLeftPanelWidth,
+    getMaxRightPanelWidth,
+    getMaxRunPanelHeight,
+    setLeftPanelWidth,
+    setRightPanelWidth,
+    setRunPanelHeight,
+  ]);
+
+  const startResizeDrag = useCallback(
+    (kind: ResizeHandleKind, event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+
+      dragCleanupRef.current?.();
+
+      const startX = event.clientX;
+      const startY = event.clientY;
+      const startLeftWidth = leftPanelWidth;
+      const startRightWidth = rightPanelWidth;
+      const startRunHeight = runPanelHeight;
+      const previousCursor = document.body.style.cursor;
+      const previousUserSelect = document.body.style.userSelect;
+
+      setDraggingHandle(kind);
+      document.body.style.cursor =
+        kind === "bottom" ? "row-resize" : "col-resize";
+      document.body.style.userSelect = "none";
+
+      const cleanup = () => {
+        document.body.style.cursor = previousCursor;
+        document.body.style.userSelect = previousUserSelect;
+        window.removeEventListener("pointermove", onPointerMove);
+        window.removeEventListener("pointerup", onPointerUp);
+        dragCleanupRef.current = null;
+        setDraggingHandle(null);
+      };
+
+      const onPointerMove = (moveEvent: PointerEvent) => {
+        if (kind === "left") {
+          updateLeftPanelWidth(startLeftWidth + (moveEvent.clientX - startX));
+          return;
+        }
+        if (kind === "right") {
+          updateRightPanelWidth(startRightWidth - (moveEvent.clientX - startX));
+          return;
+        }
+        updateRunPanelHeight(startRunHeight - (moveEvent.clientY - startY));
+      };
+
+      const onPointerUp = () => {
+        cleanup();
+      };
+
+      window.addEventListener("pointermove", onPointerMove);
+      window.addEventListener("pointerup", onPointerUp);
+      dragCleanupRef.current = cleanup;
+    },
+    [
+      leftPanelWidth,
+      rightPanelWidth,
+      runPanelHeight,
+      updateLeftPanelWidth,
+      updateRightPanelWidth,
+      updateRunPanelHeight,
+    ],
+  );
+
+  const handleResizeKeyDown = useCallback(
+    (kind: ResizeHandleKind, event: ReactKeyboardEvent<HTMLDivElement>) => {
+      if (kind === "left") {
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          updateLeftPanelWidth(leftPanelWidth - KEYBOARD_RESIZE_STEP);
+          return;
+        }
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          updateLeftPanelWidth(leftPanelWidth + KEYBOARD_RESIZE_STEP);
+          return;
+        }
+      }
+
+      if (kind === "right") {
+        if (event.key === "ArrowLeft") {
+          event.preventDefault();
+          updateRightPanelWidth(rightPanelWidth + KEYBOARD_RESIZE_STEP);
+          return;
+        }
+        if (event.key === "ArrowRight") {
+          event.preventDefault();
+          updateRightPanelWidth(rightPanelWidth - KEYBOARD_RESIZE_STEP);
+          return;
+        }
+      }
+
+      if (kind === "bottom") {
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          updateRunPanelHeight(runPanelHeight + KEYBOARD_RESIZE_STEP);
+          return;
+        }
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          updateRunPanelHeight(runPanelHeight - KEYBOARD_RESIZE_STEP);
+        }
+      }
+    },
+    [
+      leftPanelWidth,
+      rightPanelWidth,
+      runPanelHeight,
+      updateLeftPanelWidth,
+      updateRightPanelWidth,
+      updateRunPanelHeight,
+    ],
+  );
+
+  const resetPanelSize = useCallback(
+    (kind: ResizeHandleKind) => {
+      if (kind === "left") {
+        updateLeftPanelWidth(LEFT_PANEL_DEFAULT_WIDTH);
+        return;
+      }
+      if (kind === "right") {
+        updateRightPanelWidth(RIGHT_PANEL_DEFAULT_WIDTH);
+        return;
+      }
+      updateRunPanelHeight(RUN_PANEL_DEFAULT_HEIGHT);
+    },
+    [updateLeftPanelWidth, updateRightPanelWidth, updateRunPanelHeight],
+  );
+
+  const leftPanelMaxWidth = getMaxLeftPanelWidth();
+  const rightPanelMaxWidth = getMaxRightPanelWidth();
+  const runPanelMaxHeight = getMaxRunPanelHeight();
 
   useEffect(() => {
     if (paths.length === 0) {
@@ -234,6 +497,7 @@ export function WorkspaceCollabLayout({
       <CollaboratorStrip peers={peers} aiPresence={aiPresence} />
 
       <div
+        ref={layoutBodyRef}
         style={{
           display: "flex",
           flex: 1,
@@ -241,66 +505,243 @@ export function WorkspaceCollabLayout({
           flexDirection: "column",
         }}
       >
-        <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
-          <FileTree
-            activePath={activePath}
-            peerFileColors={peerFileColors}
-            onSelect={setActivePath}
-            onCreate={() => {
-              const path = createUntitledFile(ydoc);
-              setActivePath(path);
+        <div
+          ref={topRowRef}
+          style={{
+            display: "flex",
+            flex: 1,
+            minHeight: TOP_SECTION_MIN_HEIGHT,
+            minWidth: 0,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              width: leftPanelWidth,
+              minWidth: LEFT_PANEL_MIN_WIDTH,
+              maxWidth: leftPanelMaxWidth,
+              flexShrink: 0,
+              minHeight: 0,
             }}
-            onRename={(path) => {
-              const next = window.prompt("Cale nouă (ex: src/main.ts)", path);
-              if (next == null) return;
-              if (!renameFile(ydoc, path, next)) {
-                window.alert("Redenumire invalidă sau fișier existent.");
-                return;
-              }
-              if (activePath === path) {
-                setActivePath(next.trim());
-              }
+          >
+            <FileTree
+              activePath={activePath}
+              peerFileColors={peerFileColors}
+              onSelect={setActivePath}
+              onCreate={() => {
+                const path = createUntitledFile(ydoc);
+                setActivePath(path);
+              }}
+              onRename={(path) => {
+                const next = window.prompt("Cale nouă (ex: src/main.ts)", path);
+                if (next == null) return;
+                if (!renameFile(ydoc, path, next)) {
+                  window.alert("Redenumire invalidă sau fișier existent.");
+                  return;
+                }
+                if (activePath === path) {
+                  setActivePath(next.trim());
+                }
+              }}
+              onDelete={(path) => {
+                if (!window.confirm(`Ștergi ${path}?`)) return;
+                deleteFile(ydoc, path);
+              }}
+              style={{ width: "100%", height: "100%" }}
+            />
+          </div>
+
+          <ResizeHandle
+            ariaLabel="Resize Files Explorer"
+            isDragging={draggingHandle === "left"}
+            onDoubleClick={() => {
+              resetPanelSize("left");
             }}
-            onDelete={(path) => {
-              if (!window.confirm(`Ștergi ${path}?`)) return;
-              deleteFile(ydoc, path);
+            onKeyDown={(event) => {
+              handleResizeKeyDown("left", event);
             }}
+            onPointerDown={(event) => {
+              startResizeDrag("left", event);
+            }}
+            orientation="vertical"
           />
-          <CollabMonacoEditor
-            workspaceId={workspaceId}
-            activePath={activePath}
-            ytext={ytext}
-            localUser={{ id: currentUser.id, name: currentUser.name }}
-            cursorColorHex={cursorHex}
-            aiDecorationRanges={aiDecorationRanges}
-            revealRequest={revealRequest}
-            onRevealHandled={clearReveal}
+
+          <div
+            style={{
+              display: "flex",
+              flex: 1,
+              minWidth: CENTER_PANEL_MIN_WIDTH,
+              minHeight: 0,
+              overflow: "hidden",
+            }}
+          >
+            <CollabMonacoEditor
+              workspaceId={workspaceId}
+              activePath={activePath}
+              ytext={ytext}
+              localUser={{ id: currentUser.id, name: currentUser.name }}
+              cursorColorHex={cursorHex}
+              aiDecorationRanges={aiDecorationRanges}
+              revealRequest={revealRequest}
+              onRevealHandled={clearReveal}
+            />
+          </div>
+
+          <ResizeHandle
+            ariaLabel="Resize AI Sidebar"
+            isDragging={draggingHandle === "right"}
+            onDoubleClick={() => {
+              resetPanelSize("right");
+            }}
+            onKeyDown={(event) => {
+              handleResizeKeyDown("right", event);
+            }}
+            onPointerDown={(event) => {
+              startResizeDrag("right", event);
+            }}
+            orientation="vertical"
           />
-          <AiSuggestionsSidebar
-            workspaceId={workspaceId}
-            currentUserId={currentUser.id}
-            activePath={activePath}
-            setActivePath={setActivePath}
-            files={files}
-            ydoc={ydoc}
-            sendAiPresence={sendAiPresence}
-            aiPresenceChannelReady={aiPresenceWs}
-            onPendingChange={setPendingSuggestions}
-            onRequestReveal={handleReveal}
-          />
+
+          <div
+            style={{
+              width: rightPanelWidth,
+              minWidth: RIGHT_PANEL_MIN_WIDTH,
+              maxWidth: rightPanelMaxWidth,
+              flexShrink: 0,
+              minHeight: 0,
+            }}
+          >
+            <AiSuggestionsSidebar
+              workspaceId={workspaceId}
+              currentUserId={currentUser.id}
+              activePath={activePath}
+              setActivePath={setActivePath}
+              files={files}
+              ydoc={ydoc}
+              sendAiPresence={sendAiPresence}
+              aiPresenceChannelReady={aiPresenceWs}
+              onPendingChange={setPendingSuggestions}
+              onRequestReveal={handleReveal}
+              style={{ width: "100%", height: "100%" }}
+            />
+          </div>
         </div>
 
-        <RunPanel
-          job={runner.job}
-          liveLogs={runner.liveLogs}
-          error={runner.error}
-          isStarting={runner.isStarting}
-          canStart={runner.canStart}
-          streamState={runner.streamState}
-          template={workspaceTemplate}
-          onRun={runner.startRun}
+        <ResizeHandle
+          ariaLabel="Resize Run Pipeline"
+          isDragging={draggingHandle === "bottom"}
+          onDoubleClick={() => {
+            resetPanelSize("bottom");
+          }}
+          onKeyDown={(event) => {
+            handleResizeKeyDown("bottom", event);
+          }}
+          onPointerDown={(event) => {
+            startResizeDrag("bottom", event);
+          }}
+          orientation="horizontal"
         />
+
+        <div
+          style={{
+            height: runPanelHeight,
+            minHeight: RUN_PANEL_MIN_HEIGHT,
+            maxHeight: runPanelMaxHeight,
+            minWidth: 0,
+            overflow: "auto",
+          }}
+        >
+          <RunPanel
+            job={runner.job}
+            liveLogs={runner.liveLogs}
+            error={runner.error}
+            isStarting={runner.isStarting}
+            canStart={runner.canStart}
+            streamState={runner.streamState}
+            template={workspaceTemplate}
+            onRun={runner.startRun}
+          />
+        </div>
       </div>
     </div>
   );
+}
+
+function ResizeHandle({
+  ariaLabel,
+  isDragging,
+  onDoubleClick,
+  onKeyDown,
+  onPointerDown,
+  orientation,
+}: {
+  ariaLabel: string;
+  isDragging: boolean;
+  onDoubleClick: () => void;
+  onKeyDown: (event: ReactKeyboardEvent<HTMLDivElement>) => void;
+  onPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  orientation: "horizontal" | "vertical";
+}): ReactNode {
+  const vertical = orientation === "vertical";
+
+  return (
+    <div
+      aria-label={ariaLabel}
+      aria-orientation={orientation}
+      onDoubleClick={onDoubleClick}
+      onKeyDown={onKeyDown}
+      onPointerDown={onPointerDown}
+      role="separator"
+      tabIndex={0}
+      title={`${ariaLabel}. Drag to resize or double-click to reset.`}
+      style={{
+        width: vertical ? HANDLE_SIZE : "100%",
+        height: vertical ? "100%" : HANDLE_SIZE,
+        flexShrink: 0,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        cursor: vertical ? "col-resize" : "row-resize",
+        touchAction: "none",
+        background: isDragging
+          ? "rgba(56, 189, 248, 0.18)"
+          : "rgba(15, 23, 42, 0.92)",
+        borderLeft: vertical ? "1px solid #0f172a" : undefined,
+        borderRight: vertical ? "1px solid #0f172a" : undefined,
+        borderTop: vertical ? undefined : "1px solid #0f172a",
+        borderBottom: vertical ? undefined : "1px solid #0f172a",
+        outline: "none",
+      }}
+    >
+      <span
+        style={{
+          width: vertical ? 3 : 52,
+          height: vertical ? 52 : 3,
+          borderRadius: 999,
+          background: isDragging ? "#38bdf8" : "#334155",
+        }}
+      />
+    </div>
+  );
+}
+
+function useStoredPanelSize(key: string, fallback: number) {
+  const [value, setValue] = useState(() => {
+    if (typeof window === "undefined") {
+      return fallback;
+    }
+    const raw = window.localStorage.getItem(key);
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  });
+
+  useEffect(() => {
+    window.localStorage.setItem(key, String(Math.round(value)));
+  }, [key, value]);
+
+  return [value, setValue] as const;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max);
 }

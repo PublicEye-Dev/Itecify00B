@@ -10,6 +10,7 @@ export function FileTree({
   onDelete,
   /** Culoare indicator pentru fiecare fișier deschis de alt colaborator (nu tu). */
   peerFileColors,
+  style,
 }: {
   activePath: string | null;
   onSelect: (path: string) => void;
@@ -17,6 +18,7 @@ export function FileTree({
   onRename: (path: string) => void;
   onDelete: (path: string) => void;
   peerFileColors?: Map<string, string>;
+  style?: CSSProperties;
 }): ReactNode {
   const { files } = useWorkspaceCollab();
   const paths = useYjsFilePaths(files);
@@ -25,6 +27,9 @@ export function FileTree({
     <aside
       style={{
         width: 260,
+        height: "100%",
+        minWidth: 0,
+        minHeight: 0,
         borderRight: "1px solid #222",
         display: "flex",
         flexDirection: "column",
@@ -32,6 +37,7 @@ export function FileTree({
         color: "#e0e0e0",
         fontFamily: "ui-monospace, Menlo, Consolas, monospace",
         fontSize: 13,
+        ...style,
       }}
     >
       <div
@@ -61,7 +67,15 @@ export function FileTree({
           + Nou
         </button>
       </div>
-      <ul style={{ listStyle: "none", margin: 0, padding: 8, overflow: "auto", flex: 1 }}>
+      <ul
+        style={{
+          listStyle: "none",
+          margin: 0,
+          padding: 8,
+          overflow: "auto",
+          flex: 1,
+        }}
+      >
         {paths.map((p) => (
           <li key={p} style={{ marginBottom: 4 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
