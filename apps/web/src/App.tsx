@@ -1,8 +1,13 @@
+import { WorkspaceCollabProvider } from "./lib/collab/WorkspaceCollabProvider.js";
+import { WorkspaceCollabLayout } from "./features/files/WorkspaceCollabLayout.js";
+import { useWorkspaceId } from "./useWorkspaceId.js";
+
 export function App() {
+  const workspaceId = useWorkspaceId();
+
   return (
-    <main style={{ fontFamily: "system-ui", padding: "2rem" }}>
-      <h1>iTECify</h1>
-      <p>React + Vite + TypeScript (strict). API și collab au endpoint-uri /health.</p>
-    </main>
+    <WorkspaceCollabProvider workspaceId={workspaceId}>
+      <WorkspaceCollabLayout workspaceId={workspaceId} />
+    </WorkspaceCollabProvider>
   );
 }

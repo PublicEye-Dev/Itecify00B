@@ -73,6 +73,16 @@ Monorepo pentru un editor colaborativ de cod, sugestii AI și rulare în sandbox
 
 WebSocket Yjs: `ws://localhost:1234` (același server ca health-ul de mai sus).
 
+### Editor colaborativ (Yjs + Monaco)
+
+- Deschide același workspace în două taburi: același query `?workspace=demo` (implicit `default`).
+- **Room / workspace:** numele room-ului pentru `WebsocketProvider` este `workspaceId` (trebuie identic în toate taburile).
+- **Forma documentului:** într-un `Y.Doc` există un singur `Y.Map` la cheia `files` (vezi `packages/shared/src/collab`). Fiecare cheie este calea fișierului, valoarea este `Y.Text`.
+- **Seed / snapshot:** la deschidere, clientul cere `GET /workspaces/:id/snapshot` pe API; dacă primește update Yjs, aplică `Y.applyUpdate` **înainte** de conexiunea WebSocket. După editări, un `PUT` debounced persistă `encodeStateAsUpdate` în memorie (API stub).
+- **Reconnect:** `y-websocket` reconectează automat socket-ul; după reconectare, starea se realiniază din documentul partajat. Dacă nu există alt peer online și serverul collab e in-memory, ultima stare vine din snapshot-ul salvat pe API sau din bootstrap (`README.md` în map dacă e gol).
+
+Variabile utile în `.env`: `VITE_API_URL`, `VITE_COLLAB_WS_URL`.
+
 ## Scripturi utile (rădăcină)
 
 | Script        | Rol                          |
@@ -102,6 +112,12 @@ WebSocket Yjs: `ws://localhost:1234` (același server ca health-ul de mai sus).
 ├── pnpm-workspace.yaml
 └── tsconfig.base.json
 ```
+
+## Dev pe Windows / de ce vezi „Failed” după `pnpm dev`
+
+- **`^C` în terminal = Ctrl+C (întrerupere manuală).** `pnpm dev` pornește **în paralel** web, api și collab; un singur Ctrl+C oprește toate procesele, iar pnpm le marchează pe fiecare ca **Failed** — nu înseamnă neapărat că au crăpat singure.
+- **Vite și `.env`:** cu `envDir` la rădăcina monorepo-ului, Vite urmărea `.env` și repornește la salvare. În `vite.config.ts`, fișierele tipice (`.env`, `.env.local`, `.env.development` …) sunt ignorate la **watch** ca să nu tot vezi „restarting server”; variabilele `VITE_*` se tot citesc la pornire — dacă le editezi, repornește manual Vite.
+- **Loguri mai clare:** `pnpm dev` folosește `--stream` ca fiecare linie să aibă prefix de pachet (`@itecify/api`, etc.), iar api/collab afișează `Starting…` / `Ready`. În dev, Fastify folosește `logger: false` — Pino bufferizează stdout când nu e TTY (sub pnpm), deci înainte puteai vedea doar Vite.
 
 ## Manual verification
 

@@ -1,4 +1,4 @@
-declare module "y-websocket/bin/utils.cjs" {
+declare module "y-websocket/bin/utils" {
   import type { IncomingMessage } from "node:http";
   import type { WebSocket } from "ws";
 
