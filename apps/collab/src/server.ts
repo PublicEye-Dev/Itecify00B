@@ -11,6 +11,7 @@ import { PrismaClient } from "@prisma/client";
 import { WebSocketServer } from "ws";
 import { createHealthPayload } from "@itecify/shared";
 import { hasValidSession } from "./auth.js";
+import { attachAiPresenceSocket } from "./aiPresenceHub.js";
 import { attachCursorSocket } from "./cursorHub.js";
 
 console.log("[collab] Starting…");
@@ -27,8 +28,9 @@ const prisma = new PrismaClient();
 const wss = new WebSocketServer({ noServer: true });
 wss.on("connection", setupWSConnection);
 
-/** Canale JSON pentru cursori; Yjs rămâne pe upgrade-ul implicit. */
+/** Canale JSON pentru cursori și prezență AI; Yjs rămâne pe upgrade-ul implicit. */
 const cursorWss = new WebSocketServer({ noServer: true });
+const aiPresenceWss = new WebSocketServer({ noServer: true });
 
 function rejectUpgrade(
   socket: Duplex,
@@ -91,6 +93,21 @@ server.on("upgrade", (request, socket, head) => {
       return;
     }
 
+    if (path === "/ws-ai-presence" || path === "/ws-ai-presence/") {
+      const workspaceId = new URL(
+        request.url ?? "/",
+        `http://${host}`,
+      ).searchParams.get("workspaceId")?.trim();
+      if (!workspaceId) {
+        rejectUpgrade(socket, 400, "workspaceId query required.");
+        return;
+      }
+      aiPresenceWss.handleUpgrade(request, socket, head, (ws) => {
+        attachAiPresenceSocket(ws, workspaceId);
+      });
+      return;
+    }
+
     wss.handleUpgrade(request, socket, head, (ws) => {
       wss.emit("connection", ws, request);
     });
@@ -112,6 +129,6 @@ server.on("close", () => {
 server.listen(port, host, () => {
   const shown = host === "0.0.0.0" ? "127.0.0.1" : host;
   console.log(
-    `[collab] Ready — http://${shown}:${port}  (GET /health, WS Yjs, WS /ws-cursor)`,
+    `[collab] Ready — http://${shown}:${port}  (GET /health, WS Yjs, WS /ws-cursor, WS /ws-ai-presence)`,
   );
 });

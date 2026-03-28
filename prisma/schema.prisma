@@ -68,8 +68,13 @@ model Workspace {
 }
 
 enum AiSuggestionStatus {
+  /// Generare validă; așteaptă acțiune utilizator (accept/respinge).
   VALIDATED
   REJECTED_MALFORMED
+  /// Utilizatorul a acceptat; patch-ul a fost aplicat (stare persistată).
+  ACCEPTED
+  /// Utilizatorul a respins sugestia.
+  USER_REJECTED
 }
 
 enum AiSuggestionOperationType {
@@ -90,6 +95,8 @@ model AiSuggestion {
   operationType   AiSuggestionOperationType? @map("operation_type")
   targetRange     Json?                     @map("target_range")
   replacementText String?                   @map("replacement_text") @db.Text
+  /// Textul din interval la momentul generării (verificare conflict la accept).
+  sourceSpanText  String?                   @map("source_span_text") @db.Text
   explanation     String?                   @map("explanation") @db.Text
   confidence      Float?                    @map("confidence")
 

@@ -1,3 +1,10 @@
+/* Sugestii AI în așteptare (Prompt 7) — distinct de textul uman. */
+.monaco-editor .itecify-ai-suggestion-range {
+  background-color: rgba(124, 58, 237, 0.16) !important;
+  border-bottom: 2px solid rgba(167, 139, 250, 0.65) !important;
+  box-sizing: border-box;
+}
+
 /* Cursori remote JSON (Prompt 5) + prezență AI. */
 .monaco-editor .itecify-json-remote-sel {
   box-sizing: border-box;

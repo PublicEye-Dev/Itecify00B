@@ -52,20 +52,50 @@ export const createAiSuggestionsBodySchema = z.object({
 
 export type CreateAiSuggestionsBody = z.infer<typeof createAiSuggestionsBodySchema>;
 
+export const aiSuggestionStatusSchema = z.enum([
+  "VALIDATED",
+  "REJECTED_MALFORMED",
+  "ACCEPTED",
+  "USER_REJECTED",
+]);
+
+export type AiSuggestionStatus = z.infer<typeof aiSuggestionStatusSchema>;
+
 export const aiSuggestionPersistedSchema = z.object({
   id: z.string(),
   batchId: z.string(),
   workspaceId: z.string(),
-  status: z.enum(["VALIDATED", "REJECTED_MALFORMED"]),
+  status: aiSuggestionStatusSchema,
   filePath: z.string().nullable(),
   operationType: suggestionOperationTypeSchema.nullable(),
   targetRange: targetRangeSchema.nullable(),
   replacementText: z.string().nullable(),
+  sourceSpanText: z.string().nullable(),
   explanation: z.string().nullable(),
   confidence: z.number().nullable(),
   parseError: z.string().nullable(),
   createdAt: z.string(),
 });
+
+export const listAiSuggestionsResponseSchema = z.object({
+  suggestions: z.array(aiSuggestionPersistedSchema),
+});
+
+export type ListAiSuggestionsResponse = z.infer<typeof listAiSuggestionsResponseSchema>;
+
+export const patchAiSuggestionBodySchema = z.object({
+  action: z.enum(["accept", "reject"]),
+});
+
+export type PatchAiSuggestionBody = z.infer<typeof patchAiSuggestionBodySchema>;
+
+export const patchAiSuggestionResponseSchema = z.object({
+  suggestion: aiSuggestionPersistedSchema,
+});
+
+export type PatchAiSuggestionResponse = z.infer<typeof patchAiSuggestionResponseSchema>;
+
+export type AiSuggestionPersisted = z.infer<typeof aiSuggestionPersistedSchema>;
 
 export const createAiSuggestionsResponseSchema = z.object({
   batchId: z.string(),

@@ -3,43 +3,15 @@ import type { PrismaClient } from "@prisma/client";
 import {
   aiSuggestionPayloadSchema,
   createAiSuggestionsResponseSchema,
+  extractTextInRange,
   geminiSuggestionsEnvelopeSchema,
   type CreateAiSuggestionsBody,
   type CreateAiSuggestionsResponse,
 } from "@itecify/shared/ai";
 import { HttpError } from "../auth/errors.js";
 import type { AiStructuredProvider } from "./ai.provider.js";
+import { toAiSuggestionDto } from "./aiSuggestion.mapper.js";
 import { buildSystemInstruction, buildUserPrompt } from "./prompt.js";
-
-function mapRow(row: {
-  id: string;
-  batchId: string;
-  workspaceId: string;
-  status: "VALIDATED" | "REJECTED_MALFORMED";
-  filePath: string | null;
-  operationType: "REPLACE" | "INSERT" | "DELETE" | null;
-  targetRange: unknown;
-  replacementText: string | null;
-  explanation: string | null;
-  confidence: number | null;
-  parseError: string | null;
-  createdAt: Date;
-}): CreateAiSuggestionsResponse["validated"][number] {
-  return {
-    id: row.id,
-    batchId: row.batchId,
-    workspaceId: row.workspaceId,
-    status: row.status,
-    filePath: row.filePath,
-    operationType: row.operationType,
-    targetRange: row.targetRange as CreateAiSuggestionsResponse["validated"][number]["targetRange"],
-    replacementText: row.replacementText,
-    explanation: row.explanation,
-    confidence: row.confidence,
-    parseError: row.parseError,
-    createdAt: row.createdAt.toISOString(),
-  };
-}
 
 export async function generateSuggestionsWithGemini(
   prisma: PrismaClient,
@@ -61,7 +33,12 @@ export async function generateSuggestionsWithGemini(
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    throw new HttpError(502, `Gemini request failed: ${message}`);
+    if (message.startsWith("GEMINI_QUOTA:")) {
+      throw new HttpError(429, message.replace(/^GEMINI_QUOTA:\s*/, ""));
+    }
+    const short =
+      message.length > 900 ? `${message.slice(0, 900)}…` : message;
+    throw new HttpError(502, `Gemini request failed: ${short}`);
   }
 
   let parsedUnknown: unknown;
@@ -122,6 +99,10 @@ export async function generateSuggestionsWithGemini(
       continue;
     }
 
+    const ctx = deps.body.contextFiles.find((f) => f.path === one.data.filePath);
+    const sourceSpanText =
+      ctx != null ? extractTextInRange(ctx.content, one.data.targetRange) : null;
+
     const created = await prisma.aiSuggestion.create({
       data: {
         batchId,
@@ -131,11 +112,12 @@ export async function generateSuggestionsWithGemini(
         operationType: one.data.operationType,
         targetRange: one.data.targetRange,
         replacementText: one.data.replacementText,
+        sourceSpanText,
         explanation: one.data.explanation,
         confidence: one.data.confidence,
       },
     });
-    validated.push(mapRow(created));
+    validated.push(toAiSuggestionDto(created));
   }
 
   return createAiSuggestionsResponseSchema.parse({

@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import type { AiSuggestionPersisted, TargetRange } from "@itecify/shared/ai";
 import { Link } from "react-router-dom";
 import type { UserDto } from "@itecify/shared/auth";
 import type { WorkspaceTemplateDto } from "@itecify/shared/workspaces";
 import * as Y from "yjs";
 import { CollaboratorStrip } from "../../components/collaborators/CollaboratorStrip.js";
 import { ShareLinkButton } from "../../components/share/ShareLinkButton.js";
+import { AiSuggestionsSidebar } from "../../features/ai/AiSuggestionsSidebar.js";
 import { LocalPresenceBridge } from "../../features/presence/LocalPresenceBridge.js";
 import { useCollabPresencePeers } from "../../features/presence/useCollabPresencePeers.js";
+import { useWorkspaceAiPresence } from "../../lib/collab/useWorkspaceAiPresence.js";
 import { createRunJob, getRunJob } from "../../lib/api/jobApi.js";
 import {
   useCollabConnectionStatus,
@@ -46,8 +49,24 @@ export function WorkspaceCollabLayout({
   onLogout: () => Promise<void>;
 }): ReactNode {
   const { ydoc, provider, files } = useWorkspaceCollab();
+  const [pendingSuggestions, setPendingSuggestions] = useState<AiSuggestionPersisted[]>([]);
+  const [revealRequest, setRevealRequest] = useState<{
+    range: TargetRange;
+    key: number;
+  } | null>(null);
+  const revealKeyRef = useRef(0);
+
+  const handleReveal = useCallback((filePath: string, range: TargetRange) => {
+    setActivePath(filePath);
+    revealKeyRef.current += 1;
+    setRevealRequest({ range, key: revealKeyRef.current });
+  }, []);
+
+  const clearReveal = useCallback(() => setRevealRequest(null), []);
   const { wsConnected, synced } = useCollabConnectionStatus();
   const peers = useCollabPresencePeers(provider.awareness);
+  const { presence: aiPresence, send: sendAiPresence, wsConnected: aiPresenceWs } =
+    useWorkspaceAiPresence(workspaceId);
   const cursorHex = useMemo(
     () => stableHexColorForUserId(currentUser.id),
     [currentUser.id],
@@ -78,6 +97,12 @@ export function WorkspaceCollabLayout({
     () => (activePath ? (files.get(activePath) ?? null) : null),
     [activePath, files],
   );
+
+  const aiDecorationRanges = useMemo(() => {
+    return pendingSuggestions
+      .filter((s) => s.filePath === activePath && s.targetRange)
+      .map((s) => ({ id: s.id, range: s.targetRange! }));
+  }, [pendingSuggestions, activePath]);
 
   const [runnerBusy, setRunnerBusy] = useState(false);
   const [runnerText, setRunnerText] = useState<string | null>(null);
@@ -230,7 +255,7 @@ export function WorkspaceCollabLayout({
           </button>
         </div>
       </header>
-      <CollaboratorStrip peers={peers} />
+      <CollaboratorStrip peers={peers} aiPresence={aiPresence} />
       {runnerText ? (
         <pre
           style={{
@@ -280,6 +305,21 @@ export function WorkspaceCollabLayout({
           ytext={ytext}
           localUser={{ id: currentUser.id, name: currentUser.name }}
           cursorColorHex={cursorHex}
+          aiDecorationRanges={aiDecorationRanges}
+          revealRequest={revealRequest}
+          onRevealHandled={clearReveal}
+        />
+        <AiSuggestionsSidebar
+          workspaceId={workspaceId}
+          currentUserId={currentUser.id}
+          activePath={activePath}
+          setActivePath={(p) => setActivePath(p)}
+          files={files}
+          ydoc={ydoc}
+          sendAiPresence={sendAiPresence}
+          aiPresenceChannelReady={aiPresenceWs}
+          onPendingChange={setPendingSuggestions}
+          onRequestReveal={handleReveal}
         />
       </div>
     </div>

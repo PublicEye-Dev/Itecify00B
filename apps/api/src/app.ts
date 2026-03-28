@@ -23,6 +23,8 @@ export async function buildApp() {
     origin(origin, callback) {
       callback(null, origin ?? false);
     },
+    /** Permite corelație request (header trimis din `createAiSuggestions` în dev). */
+    allowedHeaders: ["Content-Type", "Authorization", "X-Ai-Request-Id"],
   });
 
   await registerPrismaPlugin(app);
