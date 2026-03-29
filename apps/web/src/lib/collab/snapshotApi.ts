@@ -2,16 +2,21 @@ import { isWorkspaceSnapshotV1 } from "@itecify/shared/collab";
 import type { SnapshotCheckpointKindDto } from "@itecify/shared/replay";
 import {
   checkpointListResponseSchema,
+  recordCheckpointApiResponseSchema,
   restoreCheckpointResponseSchema,
 } from "@itecify/shared/replay";
 import { apiErrorSchema } from "@itecify/shared/auth";
 import {
   clearExpiredAutosaveSuppress,
   isAutosavePersistSuppressed,
+  suppressAutosavePersistForMs,
 } from "./autosaveSuppress.js";
 import { resolveApiBaseUrl } from "../api/client.js";
 
-export { suppressAutosavePersistForMs } from "./autosaveSuppress.js";
+export {
+  isAutosavePersistSuppressed,
+  suppressAutosavePersistForMs,
+} from "./autosaveSuppress.js";
 
 async function readJsonFromResponse(res: Response): Promise<unknown> {
   const text = await res.text();
@@ -83,6 +88,13 @@ export async function persistWorkspaceSnapshot(
       );
     }
     if (res.ok) {
+      /* Cursă: flush-ul debounced a pornit PUT înainte de „Salvează checkpoint” / suppress.
+       * La întoarcerea răspunsului, trebuie să respectăm suprimarea curentă, altfel apare
+       * un AUTOSAVE duplicat lângă MANUAL_SAVE (același snapshot). */
+      clearExpiredAutosaveSuppress();
+      if (isAutosavePersistSuppressed()) {
+        return;
+      }
       void recordSnapshotCheckpoint(workspaceId, "AUTOSAVE", payload).then(
         (ok) => {
           if (!ok && import.meta.env.DEV) {
@@ -96,6 +108,67 @@ export async function persistWorkspaceSnapshot(
   } catch {
     /* best-effort; collab live rămâne sursa de adevăr */
   }
+}
+
+/**
+ * PUT snapshot canonic + checkpoint MANUAL_SAVE. Folosit la butonul „Salvează checkpoint”.
+ * Suprimă temporar autosave-ul pentru a evita curse cu flush-ul debounced din provider.
+ */
+export async function saveManualCheckpointToHistory(
+  workspaceId: string,
+  update: Uint8Array,
+): Promise<{ checkpointId: string }> {
+  clearExpiredAutosaveSuppress();
+  suppressAutosavePersistForMs(2500);
+
+  const base = apiBase();
+  if (!base) {
+    throw new Error("VITE_API_URL / API indisponibil.");
+  }
+  const payload = {
+    version: 1 as const,
+    update: Array.from(update),
+  };
+  const putUrl = `${base}/workspaces/${encodeURIComponent(workspaceId)}/snapshot`;
+  const putRes = await fetch(putUrl, {
+    method: "PUT",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!putRes.ok) {
+    const errPayload = await readJsonFromResponse(putRes);
+    const apiErr = errPayload ? apiErrorSchema.safeParse(errPayload) : null;
+    throw new Error(
+      apiErr?.success
+        ? apiErr.data.message
+        : `Nu am putut salva snapshot-ul (${putRes.status}).`,
+    );
+  }
+
+  const postUrl = `${base}/workspaces/${encodeURIComponent(workspaceId)}/snapshot/checkpoints`;
+  const postRes = await fetch(postUrl, {
+    method: "POST",
+    credentials: "include",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind: "MANUAL_SAVE" as const, snapshot: payload }),
+  });
+  const postBody = await readJsonFromResponse(postRes);
+  if (!postRes.ok) {
+    const apiErr = postBody ? apiErrorSchema.safeParse(postBody) : null;
+    throw new Error(
+      apiErr?.success
+        ? apiErr.data.message
+        : `Checkpoint manual respins (${postRes.status}).`,
+    );
+  }
+  const parsed = recordCheckpointApiResponseSchema.safeParse(postBody);
+  if (!parsed.success || !parsed.data.recorded || !("id" in parsed.data)) {
+    throw new Error(
+      "Răspuns API neașteptat la salvarea checkpoint-ului manual.",
+    );
+  }
+  return { checkpointId: parsed.data.id };
 }
 
 /** Persistă înainte de runner ca Docker să vadă ultima stare din editor. */

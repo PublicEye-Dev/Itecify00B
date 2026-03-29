@@ -8,6 +8,7 @@ export const snapshotCheckpointKindSchema = z.enum([
   "AUTOSAVE",
   "PRE_RUN",
   "AI_ACCEPTED",
+  "MANUAL_SAVE",
 ]);
 
 export type SnapshotCheckpointKindDto = z.infer<
@@ -52,4 +53,24 @@ export const restoreCheckpointResponseSchema = z.object({
 
 export type RestoreCheckpointResponseDto = z.infer<
   typeof restoreCheckpointResponseSchema
+>;
+
+/** Răspuns POST `/snapshot/checkpoints` (înregistrare punct în istoric). */
+export const recordCheckpointApiResponseSchema = z.discriminatedUnion(
+  "recorded",
+  [
+    z.object({
+      ok: z.literal(true),
+      recorded: z.literal(true),
+      id: z.string(),
+    }),
+    z.object({
+      ok: z.literal(true),
+      recorded: z.literal(false),
+    }),
+  ],
+);
+
+export type RecordCheckpointApiResponseDto = z.infer<
+  typeof recordCheckpointApiResponseSchema
 >;

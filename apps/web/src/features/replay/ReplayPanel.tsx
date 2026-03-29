@@ -26,6 +26,8 @@ function kindLabel(kind: SnapshotCheckpointKindDto): string {
       return "Înainte de rulare";
     case "AI_ACCEPTED":
       return "După accept AI";
+    case "MANUAL_SAVE":
+      return "Salvare manuală";
     default:
       return kind;
   }

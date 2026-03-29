@@ -23,7 +23,11 @@ import {
   useWorkspaceCollab,
 } from "../../lib/collab/WorkspaceCollabProvider.js";
 import { stableHexColorForUserId } from "../../lib/collab/collabColors.js";
-import { persistWorkspaceSnapshotBlocking } from "../../lib/collab/snapshotApi.js";
+import {
+  isAutosavePersistSuppressed,
+  persistWorkspaceSnapshotBlocking,
+  saveManualCheckpointToHistory,
+} from "../../lib/collab/snapshotApi.js";
 import { useWorkspaceAiPresence } from "../../lib/collab/useWorkspaceAiPresence.js";
 import { CollabMonacoEditor } from "../editor/CollabMonacoEditor.js";
 import { ReplayPanel } from "../replay/ReplayPanel.js";
@@ -399,6 +403,86 @@ export function WorkspaceCollabLayout({
   }, [pendingSuggestions, activePath]);
 
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [manualSaveBusy, setManualSaveBusy] = useState(false);
+  const [manualSaveHint, setManualSaveHint] = useState<string | null>(null);
+  const manualSaveInFlight = useRef(false);
+  const manualSaveHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const handleManualSaveRef = useRef<() => Promise<void>>(async () => {});
+
+  const handleManualSave = useCallback(async () => {
+    if (manualSaveInFlight.current) return;
+    if (isAutosavePersistSuppressed()) {
+      window.alert(
+        "Salvare checkpoint indisponibilă momentan (restore sau operație în curs). Încearcă după câteva secunde.",
+      );
+      return;
+    }
+    manualSaveInFlight.current = true;
+    setManualSaveBusy(true);
+    setManualSaveHint(null);
+    try {
+      const { checkpointId } = await saveManualCheckpointToHistory(
+        workspaceId,
+        Y.encodeStateAsUpdate(ydoc),
+      );
+      setHistoryRefreshKey((k) => k + 1);
+      window.dispatchEvent(
+        new CustomEvent("itecify-checkpoints-changed", {
+          detail: { workspaceId },
+        }),
+      );
+      const t = new Date();
+      const timeStr = t.toLocaleTimeString("ro-RO", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+      setManualSaveHint(
+        `Checkpoint salvat (${timeStr}) · id ${checkpointId.slice(0, 8)}…`,
+      );
+      if (manualSaveHintTimerRef.current) {
+        clearTimeout(manualSaveHintTimerRef.current);
+      }
+      manualSaveHintTimerRef.current = setTimeout(() => {
+        setManualSaveHint(null);
+        manualSaveHintTimerRef.current = null;
+      }, 4500);
+    } catch (e) {
+      window.alert(
+        e instanceof Error ? e.message : "Salvarea checkpoint-ului a eșuat.",
+      );
+    } finally {
+      manualSaveInFlight.current = false;
+      setManualSaveBusy(false);
+    }
+  }, [workspaceId, ydoc]);
+
+  useEffect(() => {
+    handleManualSaveRef.current = handleManualSave;
+  }, [handleManualSave]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.ctrlKey || e.metaKey) || e.key !== "s") return;
+      e.preventDefault();
+      e.stopPropagation();
+      void handleManualSaveRef.current();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (manualSaveHintTimerRef.current) {
+        clearTimeout(manualSaveHintTimerRef.current);
+      }
+    };
+  }, []);
 
   const runner = useWorkspaceRun({
     workspaceId,
@@ -679,78 +763,130 @@ export function WorkspaceCollabLayout({
           }}
         >
           <div
-            role="tablist"
-            aria-label="Panou inferior workspace"
             style={{
-              display: "flex",
               flexShrink: 0,
-              flexWrap: "wrap",
-              gap: 4,
-              padding: "6px 10px 0",
               borderBottom: "1px solid #2a3340",
             }}
           >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={bottomTab === "run"}
-              id={`${workspaceId}-tab-run`}
-              aria-controls={`${workspaceId}-panel-run`}
-              onClick={() => {
-                setBottomTab("run");
-              }}
+            <div
               style={{
-                padding: "8px 14px",
-                fontSize: 13,
-                fontWeight: 600,
-                border: "none",
-                borderRadius: "8px 8px 0 0",
-                cursor: "pointer",
-                background:
-                  bottomTab === "run"
-                    ? "rgba(56, 189, 248, 0.12)"
-                    : "transparent",
-                color: bottomTab === "run" ? "#e5eef6" : "#94a8c4",
-                borderBottom:
-                  bottomTab === "run"
-                    ? "2px solid #38bdf8"
-                    : "2px solid transparent",
-                marginBottom: -1,
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "flex-end",
+                gap: 8,
+                padding: "6px 10px 0",
               }}
             >
-              Run Pipeline
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={bottomTab === "history"}
-              id={`${workspaceId}-tab-history`}
-              aria-controls={`${workspaceId}-panel-history`}
-              onClick={() => {
-                setBottomTab("history");
-              }}
-              style={{
-                padding: "8px 14px",
-                fontSize: 13,
-                fontWeight: 600,
-                border: "none",
-                borderRadius: "8px 8px 0 0",
-                cursor: "pointer",
-                background:
-                  bottomTab === "history"
-                    ? "rgba(56, 189, 248, 0.12)"
-                    : "transparent",
-                color: bottomTab === "history" ? "#e5eef6" : "#94a8c4",
-                borderBottom:
-                  bottomTab === "history"
-                    ? "2px solid #38bdf8"
-                    : "2px solid transparent",
-                marginBottom: -1,
-              }}
-            >
-              Istoric & replay
-            </button>
+              <div
+                role="tablist"
+                aria-label="Panou inferior workspace"
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 4,
+                  flex: "1 1 200px",
+                  minWidth: 0,
+                }}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={bottomTab === "run"}
+                  id={`${workspaceId}-tab-run`}
+                  aria-controls={`${workspaceId}-panel-run`}
+                  onClick={() => {
+                    setBottomTab("run");
+                  }}
+                  style={{
+                    padding: "8px 14px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    border: "none",
+                    borderRadius: "8px 8px 0 0",
+                    cursor: "pointer",
+                    background:
+                      bottomTab === "run"
+                        ? "rgba(56, 189, 248, 0.12)"
+                        : "transparent",
+                    color: bottomTab === "run" ? "#e5eef6" : "#94a8c4",
+                    borderBottom:
+                      bottomTab === "run"
+                        ? "2px solid #38bdf8"
+                        : "2px solid transparent",
+                    marginBottom: -1,
+                  }}
+                >
+                  Run Pipeline
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={bottomTab === "history"}
+                  id={`${workspaceId}-tab-history`}
+                  aria-controls={`${workspaceId}-panel-history`}
+                  onClick={() => {
+                    setBottomTab("history");
+                  }}
+                  style={{
+                    padding: "8px 14px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    border: "none",
+                    borderRadius: "8px 8px 0 0",
+                    cursor: "pointer",
+                    background:
+                      bottomTab === "history"
+                        ? "rgba(56, 189, 248, 0.12)"
+                        : "transparent",
+                    color: bottomTab === "history" ? "#e5eef6" : "#94a8c4",
+                    borderBottom:
+                      bottomTab === "history"
+                        ? "2px solid #38bdf8"
+                        : "2px solid transparent",
+                    marginBottom: -1,
+                  }}
+                >
+                  Istoric & replay
+                </button>
+              </div>
+              <button
+                type="button"
+                disabled={manualSaveBusy}
+                title="Salvează starea curentă a workspace-ului ca punct în istoric (Ctrl+S / Cmd+S)"
+                onClick={() => {
+                  void handleManualSave();
+                }}
+                style={{
+                  padding: "8px 14px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  borderRadius: 8,
+                  cursor: manualSaveBusy ? "wait" : "pointer",
+                  border: "1px solid rgba(56, 189, 248, 0.45)",
+                  background: "rgba(56, 189, 248, 0.14)",
+                  color: "#e0f2fe",
+                  opacity: manualSaveBusy ? 0.75 : 1,
+                  whiteSpace: "nowrap",
+                  marginBottom: 2,
+                }}
+              >
+                {manualSaveBusy ? "Se salvează checkpoint…" : "Salvează checkpoint"}
+              </button>
+            </div>
           </div>
+          {manualSaveHint ? (
+            <div
+              role="status"
+              style={{
+                padding: "4px 10px 6px",
+                fontSize: 12,
+                color: "#86efac",
+                flexShrink: 0,
+              }}
+            >
+              {manualSaveHint}
+            </div>
+          ) : null}
 
           <div
             role="tabpanel"

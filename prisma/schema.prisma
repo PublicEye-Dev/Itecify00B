@@ -73,6 +73,8 @@ enum SnapshotCheckpointKind {
   AUTOSAVE
   PRE_RUN
   AI_ACCEPTED
+  /// Salvare explicită la cerere (buton / scurtătură), pentru demo și control utilizator.
+  MANUAL_SAVE
 }
 
 model WorkspaceSnapshotCheckpoint {
