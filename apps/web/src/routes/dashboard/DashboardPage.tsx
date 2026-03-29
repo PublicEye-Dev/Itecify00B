@@ -16,6 +16,7 @@ import {
   joinWorkspace,
   listWorkspaces,
 } from "../../lib/api/workspaceApi.js";
+import { useToast } from "../../components/ui/toast.js";
 
 const templates: { value: WorkspaceTemplateDto; label: string }[] = [
   { value: "javascript", label: "JavaScript" },
@@ -31,6 +32,7 @@ export function DashboardPage({
   currentUser: UserDto;
   onLogout: () => void;
 }): ReactNode {
+  const { toast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [items, setItems] = useState<WorkspacePublicDto[]>([]);
@@ -74,6 +76,11 @@ export function DashboardPage({
     setError(null);
     try {
       const { workspace } = await createWorkspace({ name, template });
+      toast({
+        title: "Workspace creat",
+        description: `${workspace.name} este pregătit pentru colaborare.`,
+        tone: "success",
+      });
       navigate(`/workspace/${workspace.id}`);
     } catch {
       setError("Crearea workspace-ului a eșuat.");
@@ -87,7 +94,14 @@ export function DashboardPage({
     setBusy(true);
     setError(null);
     try {
-      const { workspace } = await joinWorkspace({ shareToken: shareToken.trim() });
+      const { workspace } = await joinWorkspace({
+        shareToken: shareToken.trim(),
+      });
+      toast({
+        title: "Ai intrat în workspace",
+        description: `Te conectez la ${workspace.name}.`,
+        tone: "success",
+      });
       navigate(`/workspace/${workspace.id}`);
     } catch {
       setError("Nu te-am putut alătura (link invalid sau deja membru).");
@@ -100,9 +114,10 @@ export function DashboardPage({
     <div
       style={{
         minHeight: "100vh",
-        background: "linear-gradient(160deg, #0f172a 0%, #1e293b 100%)",
+        background:
+          "radial-gradient(circle at top left, rgba(100, 199, 255, 0.12), transparent 26%), linear-gradient(160deg, #09111a 0%, #101926 100%)",
         color: "#e2e8f0",
-        fontFamily: "system-ui, sans-serif",
+        fontFamily: '"Aptos", "Segoe UI", sans-serif',
         padding: "2rem",
       }}
     >
@@ -117,24 +132,72 @@ export function DashboardPage({
         }}
       >
         <div>
-          <h1 style={{ margin: 0, fontSize: "1.75rem" }}>iTECify — workspace-uri</h1>
-          <p style={{ opacity: 0.85, marginTop: 8 }}>
-            Creează un workspace cu șablon de limbă sau intră cu link de share.
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              borderRadius: 999,
+              border: "1px solid rgba(130, 160, 192, 0.22)",
+              padding: "6px 12px",
+              fontSize: 11,
+              letterSpacing: "0.14em",
+              textTransform: "uppercase",
+              color: "#8fb7d0",
+              background: "rgba(8, 14, 22, 0.42)",
+            }}
+          >
+            iTECify Workspace Hub
+          </div>
+          <h1 style={{ margin: "14px 0 0", fontSize: "2rem" }}>
+            Creezi, intri și continui sesiunea de colaborare.
+          </h1>
+          <p
+            style={{
+              opacity: 0.82,
+              marginTop: 10,
+              maxWidth: 620,
+              lineHeight: 1.6,
+            }}
+          >
+            Dashboard-ul păstrează intrările esențiale aproape: creare rapidă,
+            join din link și lista workspace-urilor active pentru demo.
           </p>
         </div>
-        <div style={{ fontSize: 14, textAlign: "right" }}>
-          <div style={{ opacity: 0.9 }}>{currentUser.email}</div>
+        <div
+          style={{
+            fontSize: 14,
+            textAlign: "right",
+            padding: "14px 16px",
+            borderRadius: 18,
+            border: "1px solid rgba(130, 160, 192, 0.18)",
+            background: "rgba(8, 14, 22, 0.42)",
+            minWidth: 220,
+          }}
+        >
+          <div
+            style={{
+              opacity: 0.68,
+              fontSize: 12,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+            }}
+          >
+            Sesiune activă
+          </div>
+          <div style={{ opacity: 0.96, marginTop: 6 }}>{currentUser.email}</div>
           <button
             type="button"
             onClick={onLogout}
             style={{
-              marginTop: 8,
-              padding: "6px 12px",
-              borderRadius: 8,
-              border: "1px solid #64748b",
+              marginTop: 12,
+              padding: "8px 14px",
+              borderRadius: 12,
+              border: "1px solid rgba(130, 160, 192, 0.22)",
               background: "transparent",
               color: "#e2e8f0",
               cursor: "pointer",
+              fontWeight: 600,
             }}
           >
             Deconectare
@@ -143,7 +206,19 @@ export function DashboardPage({
       </header>
 
       {error ? (
-        <p style={{ color: "#fca5a5", marginBottom: "1rem" }}>{error}</p>
+        <p
+          style={{
+            color: "#fca5a5",
+            marginBottom: "1rem",
+            border: "1px solid rgba(255, 123, 123, 0.2)",
+            background: "rgba(55, 20, 25, 0.42)",
+            borderRadius: 16,
+            padding: "12px 14px",
+            maxWidth: 960,
+          }}
+        >
+          {error}
+        </p>
       ) : null}
 
       <div
@@ -156,14 +231,29 @@ export function DashboardPage({
       >
         <section
           style={{
-            background: "rgba(15,23,42,0.6)",
-            borderRadius: 12,
-            padding: "1.25rem",
-            border: "1px solid #334155",
+            background: "rgba(9, 16, 25, 0.78)",
+            borderRadius: 20,
+            padding: "1.35rem",
+            border: "1px solid rgba(130, 160, 192, 0.18)",
+            boxShadow: "0 18px 48px rgba(0, 0, 0, 0.18)",
           }}
         >
-          <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Workspace nou</h2>
-          <form onSubmit={(e) => void onCreate(e)} style={{ display: "grid", gap: 12 }}>
+          <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>Workspace nou</h2>
+          <p
+            style={{
+              marginTop: 8,
+              marginBottom: 16,
+              fontSize: 13,
+              color: "#8fa4ba",
+              lineHeight: 1.5,
+            }}
+          >
+            Creează rapid un sandbox pornind de la șablonul limbii de concurs.
+          </p>
+          <form
+            onSubmit={(e) => void onCreate(e)}
+            style={{ display: "grid", gap: 12 }}
+          >
             <label style={{ display: "grid", gap: 4 }}>
               Nume
               <input
@@ -197,14 +287,30 @@ export function DashboardPage({
 
         <section
           style={{
-            background: "rgba(15,23,42,0.6)",
-            borderRadius: 12,
-            padding: "1.25rem",
-            border: "1px solid #334155",
+            background: "rgba(9, 16, 25, 0.78)",
+            borderRadius: 20,
+            padding: "1.35rem",
+            border: "1px solid rgba(130, 160, 192, 0.18)",
+            boxShadow: "0 18px 48px rgba(0, 0, 0, 0.18)",
           }}
         >
-          <h2 style={{ marginTop: 0, fontSize: "1.1rem" }}>Intră cu link</h2>
-          <form onSubmit={(e) => void onJoin(e)} style={{ display: "grid", gap: 12 }}>
+          <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>Intră cu link</h2>
+          <p
+            style={{
+              marginTop: 8,
+              marginBottom: 16,
+              fontSize: 13,
+              color: "#8fa4ba",
+              lineHeight: 1.5,
+            }}
+          >
+            Pentru demo-uri live, pastează tokenul de share și intri direct în
+            sesiunea comună.
+          </p>
+          <form
+            onSubmit={(e) => void onJoin(e)}
+            style={{ display: "grid", gap: 12 }}
+          >
             <label style={{ display: "grid", gap: 4 }}>
               Token share (din URL)
               <input
@@ -223,11 +329,24 @@ export function DashboardPage({
       </div>
 
       <section style={{ marginTop: "2.5rem", maxWidth: 960 }}>
-        <h2 style={{ fontSize: "1.1rem" }}>Workspace-urile tale</h2>
+        <h2 style={{ fontSize: "1.15rem" }}>Workspace-urile tale</h2>
         {loading ? (
-          <p style={{ opacity: 0.8 }}>Se încarcă…</p>
+          <p style={{ opacity: 0.8, color: "#9fb0c2" }}>
+            Se încarcă workspace-urile…
+          </p>
         ) : items.length === 0 ? (
-          <p style={{ opacity: 0.8 }}>Niciun workspace încă.</p>
+          <div
+            style={{
+              borderRadius: 18,
+              border: "1px dashed rgba(130, 160, 192, 0.22)",
+              padding: "18px 20px",
+              color: "#9fb0c2",
+              background: "rgba(8, 14, 22, 0.3)",
+            }}
+          >
+            Nu există workspace-uri încă. Creează unul nou sau intră din link
+            pentru a porni demo-ul.
+          </div>
         ) : (
           <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
             {items.map((w) => (
@@ -237,23 +356,36 @@ export function DashboardPage({
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  padding: "12px 0",
-                  borderBottom: "1px solid #334155",
+                  padding: "16px 0",
+                  borderBottom: "1px solid rgba(130, 160, 192, 0.14)",
                   gap: 12,
                 }}
               >
                 <div>
                   <strong>{w.name}</strong>
-                  <span style={{ opacity: 0.75, marginLeft: 8 }}>
+                  <span
+                    style={{ opacity: 0.75, marginLeft: 8, color: "#9fb0c2" }}
+                  >
                     · {w.template} · {w.role}
                   </span>
-                  <div style={{ fontSize: 12, opacity: 0.65, marginTop: 4 }}>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      opacity: 0.7,
+                      marginTop: 6,
+                      color: "#88a0b7",
+                    }}
+                  >
                     Share: <code>{w.shareToken}</code>
                   </div>
                 </div>
                 <Link
                   to={`/workspace/${w.id}`}
-                  style={{ color: "#93c5fd", textDecoration: "none", fontWeight: 600 }}
+                  style={{
+                    color: "#b9e6ff",
+                    textDecoration: "none",
+                    fontWeight: 700,
+                  }}
                 >
                   Deschide →
                 </Link>
@@ -267,19 +399,20 @@ export function DashboardPage({
 }
 
 const inputStyle: CSSProperties = {
-  padding: "10px 12px",
-  borderRadius: 8,
-  border: "1px solid #475569",
-  background: "#0f172a",
+  padding: "11px 12px",
+  borderRadius: 12,
+  border: "1px solid rgba(130, 160, 192, 0.22)",
+  background: "rgba(7, 14, 22, 0.92)",
   color: "#f1f5f9",
 };
 
 const btnStyle: CSSProperties = {
-  padding: "10px 16px",
-  borderRadius: 8,
-  border: "none",
-  background: "#2563eb",
+  padding: "11px 16px",
+  borderRadius: 12,
+  border: "1px solid rgba(100, 199, 255, 0.22)",
+  background:
+    "linear-gradient(180deg, rgba(16, 94, 146, 0.95), rgba(12, 70, 110, 0.98))",
   color: "#fff",
-  fontWeight: 600,
+  fontWeight: 700,
   cursor: "pointer",
 };

@@ -9,6 +9,8 @@ import { FitAddon } from "xterm-addon-fit";
 import { Terminal } from "xterm";
 import "xterm/css/xterm.css";
 import type { RunJobPublicDto, RunLogEntryDto } from "@itecify/shared/runner";
+import { InlineBanner } from "../../components/ui/inline-banner.js";
+import { useToast } from "../../components/ui/toast.js";
 import type { RunStreamState } from "../run/useWorkspaceRun.js";
 import {
   useWorkspaceTerminal,
@@ -129,6 +131,7 @@ export function WorkspaceTerminalPanel({
   onBeforeEnsureSandbox: () => Promise<void>;
   operatorRunner: WorkspaceTerminalOperatorRunner;
 }): ReactNode {
+  const { toast } = useToast();
   const [shellMode, setShellMode] = useState(false);
   const shellModeRef = useRef(false);
   const previewStateRef = useRef<ViewerPreviewState>({ active: false });
@@ -185,6 +188,18 @@ export function WorkspaceTerminalPanel({
   syncLinePreviewRef.current = terminal.syncLinePreview;
   const sendCommandEchoRef = useRef(terminal.sendCommandEcho);
   sendCommandEchoRef.current = terminal.sendCommandEcho;
+
+  const lastToastErrorRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!terminal.error || terminal.error === lastToastErrorRef.current) return;
+    lastToastErrorRef.current = terminal.error;
+    toast({
+      title: "Avertizare terminal",
+      description: terminal.error,
+      tone: "warning",
+    });
+  }, [terminal.error, toast]);
 
   useEffect(() => {
     isTypistRef.current = terminal.isTypist;
@@ -405,12 +420,16 @@ export function WorkspaceTerminalPanel({
     return (
       <div
         style={{
-          padding: 16,
-          color: "#aaa",
+          padding: 18,
+          color: "#9fb0c2",
           fontSize: 13,
         }}
       >
-        Se incarca starea terminalului...
+        <InlineBanner
+          tone="info"
+          title="Se încarcă starea terminalului"
+          description="Verific dacă sandbox-ul este activ și dacă sesiunea partajată poate fi preluată."
+        />
       </div>
     );
   }
@@ -427,33 +446,40 @@ export function WorkspaceTerminalPanel({
           maxWidth: 520,
         }}
       >
-        <div style={{ fontSize: 14, fontWeight: 600, color: "#e5e7eb" }}>
-          Sandbox terminal nu este pornit
-        </div>
-        <p style={{ margin: 0, fontSize: 13, color: "#94a3b8", lineHeight: 1.5 }}>
-          Comenzile operator și shell-ul partajat rulează în containerul Docker al workspace-ului.
-          Porneste sandbox-ul pentru sesiunea partajată.
-        </p>
+        <InlineBanner
+          tone="warning"
+          title="Sandbox terminal oprit"
+          description="Comenzile operator și shell-ul partajat rulează în containerul Docker al workspace-ului. Pornește sandbox-ul pentru sesiunea comună."
+        />
         <button
           disabled={terminal.ensureLoading}
           onClick={() => {
             void terminal.startSandbox();
           }}
           style={{
-            border: "1px solid #38bdf8",
-            background: "#0c4a6e",
+            border: "1px solid rgba(100, 199, 255, 0.26)",
+            background:
+              "linear-gradient(180deg, rgba(15, 74, 109, 0.78), rgba(10, 51, 76, 0.92))",
             color: "#e0f2fe",
-            borderRadius: 8,
-            padding: "8px 14px",
+            borderRadius: 12,
+            padding: "10px 15px",
             cursor: terminal.ensureLoading ? "wait" : "pointer",
             fontSize: 13,
+            fontWeight: 700,
           }}
           type="button"
         >
-          {terminal.ensureLoading ? "Se porneste..." : "Porneste sandbox terminal"}
+          {terminal.ensureLoading
+            ? "Se porneste..."
+            : "Porneste sandbox terminal"}
         </button>
         {terminal.error ? (
-          <div style={{ fontSize: 12, color: "#f87171" }}>{terminal.error}</div>
+          <InlineBanner
+            tone="error"
+            title="Terminal limitat"
+            description={terminal.error}
+            compact={true}
+          />
         ) : null}
       </div>
     );
@@ -470,7 +496,9 @@ export function WorkspaceTerminalPanel({
       style={{
         display: "flex",
         flexDirection: "column",
+        width: "100%",
         height: "100%",
+        minWidth: 0,
         minHeight: 0,
         background: "#1e1e1e",
       }}
@@ -481,10 +509,11 @@ export function WorkspaceTerminalPanel({
           flexWrap: "wrap",
           alignItems: "center",
           gap: 8,
-          padding: "8px 10px",
-          borderBottom: "1px solid #333",
+          padding: "10px 12px",
+          borderBottom: "1px solid rgba(130, 160, 192, 0.14)",
           fontSize: 12,
           color: "#cbd5e1",
+          background: "rgba(8, 14, 22, 0.76)",
         }}
       >
         <span
@@ -553,7 +582,9 @@ export function WorkspaceTerminalPanel({
             padding: "4px 10px",
             fontSize: 12,
             cursor:
-              terminal.wsConnected && !terminal.isTypist ? "pointer" : "not-allowed",
+              terminal.wsConnected && !terminal.isTypist
+                ? "pointer"
+                : "not-allowed",
             opacity: terminal.wsConnected && !terminal.isTypist ? 1 : 0.5,
           }}
           type="button"
@@ -570,7 +601,10 @@ export function WorkspaceTerminalPanel({
             borderRadius: 6,
             padding: "4px 10px",
             fontSize: 12,
-            cursor: terminal.wsConnected && terminal.isTypist ? "pointer" : "not-allowed",
+            cursor:
+              terminal.wsConnected && terminal.isTypist
+                ? "pointer"
+                : "not-allowed",
             opacity: terminal.wsConnected && terminal.isTypist ? 1 : 0.5,
           }}
           type="button"
@@ -584,16 +618,49 @@ export function WorkspaceTerminalPanel({
         ) : null}
         {terminal.isTypist ? (
           <span style={{ fontSize: 11, color: "#64748b", flexBasis: "100%" }}>
-            Click în terminal pentru focus. Spectatorii văd linia tastată live. Comenzi: help, run,
-            shell, status, logs, clear, release.
+            Click în terminal pentru focus. Spectatorii văd linia tastată live.
+            Comenzi: help, run, shell, status, logs, clear, release.
           </span>
         ) : null}
       </div>
-      {terminal.error ? (
-        <div style={{ padding: "4px 10px", fontSize: 12, color: "#f87171" }}>
-          {terminal.error}
-        </div>
-      ) : null}
+      <div style={{ display: "grid", gap: 8, padding: "10px 12px 0" }}>
+        {!terminal.wsConnected ? (
+          <InlineBanner
+            tone="warning"
+            title="Terminalul se reconectează"
+            description="Fluxul WebSocket al consolei nu este conectat momentan. Ieșirea live poate întârzia câteva secunde."
+            compact={true}
+          />
+        ) : null}
+        {viewerMode ? (
+          <InlineBanner
+            tone="info"
+            title="Mod spectator"
+            description="Vezi aceeași ieșire live ca operatorul curent. Preia controlul ca să tastezi în sesiunea partajată."
+            compact={true}
+          />
+        ) : null}
+        {terminal.isTypist ? (
+          <InlineBanner
+            tone="success"
+            title={shellMode ? "Mod shell activ" : "Mod operator activ"}
+            description={
+              shellMode
+                ? "Fiecare linie este trimisă direct în container. Tastează exit pentru revenire în modul operator."
+                : "Comenzi rapide: help, run, shell, status, logs, clear și release."
+            }
+            compact={true}
+          />
+        ) : null}
+        {terminal.error ? (
+          <InlineBanner
+            tone="error"
+            title="Terminal limitat"
+            description={terminal.error}
+            compact={true}
+          />
+        ) : null}
+      </div>
       <div
         ref={containerRef}
         role="document"

@@ -3,8 +3,8 @@ import type { PrismaClient } from "@prisma/client";
 import {
   aiSuggestionPayloadSchema,
   createAiSuggestionsResponseSchema,
-  extractTextInRange,
   geminiSuggestionsEnvelopeSchema,
+  resolveSuggestionPatchInText,
   type CreateAiSuggestionsBody,
   type CreateAiSuggestionsResponse,
 } from "@itecify/shared/ai";
@@ -36,8 +36,7 @@ export async function generateSuggestionsWithGemini(
     if (message.startsWith("GEMINI_QUOTA:")) {
       throw new HttpError(429, message.replace(/^GEMINI_QUOTA:\s*/, ""));
     }
-    const short =
-      message.length > 900 ? `${message.slice(0, 900)}…` : message;
+    const short = message.length > 900 ? `${message.slice(0, 900)}…` : message;
     throw new HttpError(502, `Gemini request failed: ${short}`);
   }
 
@@ -99,9 +98,88 @@ export async function generateSuggestionsWithGemini(
       continue;
     }
 
-    const ctx = deps.body.contextFiles.find((f) => f.path === one.data.filePath);
-    const sourceSpanText =
-      ctx != null ? extractTextInRange(ctx.content, one.data.targetRange) : null;
+    const ctx = deps.body.contextFiles.find(
+      (f) => f.path === one.data.filePath,
+    );
+    if (ctx == null) {
+      const parseError =
+        "Suggestion filePath must match one of the provided context files.";
+      await prisma.aiSuggestion.create({
+        data: {
+          batchId,
+          workspaceId: deps.workspaceId,
+          status: "REJECTED_MALFORMED",
+          parseError,
+          rawCandidate: item as object,
+        },
+      });
+      rejected.push({
+        parseError,
+        rawCandidate: item,
+      });
+      continue;
+    }
+
+    const resolvedPatch = resolveSuggestionPatchInText(
+      ctx.content,
+      one.data.operationType,
+      one.data.targetRange,
+      one.data.replacementText,
+    );
+
+    if (resolvedPatch.wasClamped) {
+      const parseError =
+        "Suggestion targetRange does not fit the provided file content.";
+      await prisma.aiSuggestion.create({
+        data: {
+          batchId,
+          workspaceId: deps.workspaceId,
+          status: "REJECTED_MALFORMED",
+          parseError,
+          rawCandidate: item as object,
+        },
+      });
+      rejected.push({
+        parseError,
+        rawCandidate: item,
+      });
+      continue;
+    }
+
+    if (resolvedPatch.validationError) {
+      await prisma.aiSuggestion.create({
+        data: {
+          batchId,
+          workspaceId: deps.workspaceId,
+          status: "REJECTED_MALFORMED",
+          parseError: resolvedPatch.validationError,
+          rawCandidate: item as object,
+        },
+      });
+      rejected.push({
+        parseError: resolvedPatch.validationError,
+        rawCandidate: item,
+      });
+      continue;
+    }
+
+    if (resolvedPatch.isNoop) {
+      const parseError = "Suggestion does not change the file content.";
+      await prisma.aiSuggestion.create({
+        data: {
+          batchId,
+          workspaceId: deps.workspaceId,
+          status: "REJECTED_MALFORMED",
+          parseError,
+          rawCandidate: item as object,
+        },
+      });
+      rejected.push({
+        parseError,
+        rawCandidate: item,
+      });
+      continue;
+    }
 
     const created = await prisma.aiSuggestion.create({
       data: {
@@ -109,10 +187,10 @@ export async function generateSuggestionsWithGemini(
         workspaceId: deps.workspaceId,
         status: "VALIDATED",
         filePath: one.data.filePath,
-        operationType: one.data.operationType,
-        targetRange: one.data.targetRange,
-        replacementText: one.data.replacementText,
-        sourceSpanText,
+        operationType: resolvedPatch.operationType,
+        targetRange: resolvedPatch.range,
+        replacementText: resolvedPatch.replacementText,
+        sourceSpanText: resolvedPatch.sourceText,
         explanation: one.data.explanation,
         confidence: one.data.confidence,
       },
