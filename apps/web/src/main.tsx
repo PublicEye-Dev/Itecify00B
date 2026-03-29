@@ -1,7 +1,9 @@
+import "./styles/ui.css";
 import "./lib/monaco/monacoEnvironment.js";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App.js";
+import { ToastProvider } from "./components/ui/toast.js";
 
 const el = document.getElementById("root");
 if (!el) {
@@ -10,6 +12,8 @@ if (!el) {
 
 createRoot(el).render(
   <StrictMode>
-    <App />
+    <ToastProvider>
+      <App />
+    </ToastProvider>
   </StrictMode>,
 );

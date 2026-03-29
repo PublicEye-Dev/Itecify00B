@@ -4,17 +4,37 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import type { AiSuggestionPersisted, TargetRange } from "@itecify/shared/ai";
 import type { UserDto } from "@itecify/shared/auth";
+import type { RunJobStatusDto } from "@itecify/shared/runner";
 import type { WorkspaceTemplateDto } from "@itecify/shared/workspaces";
 import { Link } from "react-router-dom";
 import * as Y from "yjs";
 import { CollaboratorStrip } from "../../components/collaborators/CollaboratorStrip.js";
 import { ShareLinkButton } from "../../components/share/ShareLinkButton.js";
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../../components/ui/alert-dialog.js";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "../../components/ui/dialog.js";
+import { InlineBanner } from "../../components/ui/inline-banner.js";
+import { useToast } from "../../components/ui/toast.js";
 import { AiSuggestionsSidebar } from "../../features/ai/AiSuggestionsSidebar.js";
 import { LocalPresenceBridge } from "../../features/presence/LocalPresenceBridge.js";
 import { useCollabPresencePeers } from "../../features/presence/useCollabPresencePeers.js";
@@ -50,12 +70,56 @@ const CENTER_PANEL_MIN_WIDTH = 360;
 const BOTTOM_PANEL_DEFAULT_HEIGHT = 320;
 const BOTTOM_PANEL_MIN_HEIGHT = 220;
 const TOP_SECTION_MIN_HEIGHT = 220;
-const HANDLE_SIZE = 10;
+const HANDLE_SIZE = 12;
 const KEYBOARD_RESIZE_STEP = 24;
+const TERMINAL_RUN_STATUSES: RunJobStatusDto[] = [
+  "SUCCEEDED",
+  "FAILED",
+  "TIMEOUT",
+  "CANCELLED",
+  "BLOCKED",
+];
 
 type BottomWorkspaceTab = "run" | "history" | "terminal";
 
 type ResizeHandleKind = "left" | "right" | "bottom";
+
+function shortId(value: string): string {
+  return value.length > 8 ? `${value.slice(0, 8)}…` : value;
+}
+
+function describeRunOutcome(status: RunJobStatusDto): {
+  title: string;
+  tone: "success" | "warning" | "error";
+} {
+  switch (status) {
+    case "SUCCEEDED":
+      return {
+        title: "Pipeline finalizat",
+        tone: "success",
+      };
+    case "BLOCKED":
+      return {
+        title: "Rularea a fost blocată",
+        tone: "warning",
+      };
+    case "TIMEOUT":
+      return {
+        title: "Rularea a expirat",
+        tone: "warning",
+      };
+    case "CANCELLED":
+      return {
+        title: "Rularea a fost anulată",
+        tone: "warning",
+      };
+    default:
+      return {
+        title: "Rularea a eșuat",
+        tone: "error",
+      };
+  }
+}
 
 export function WorkspaceCollabLayout({
   workspaceId,
@@ -72,6 +136,7 @@ export function WorkspaceCollabLayout({
   currentUser: UserDto;
   onLogout: () => Promise<void>;
 }): ReactNode {
+  const { toast } = useToast();
   const { ydoc, provider, files } = useWorkspaceCollab();
   const panelStorageKey = useMemo(
     () => `itecify:workspace-layout:${workspaceId}`,
@@ -104,6 +169,12 @@ export function WorkspaceCollabLayout({
   const [draggingHandle, setDraggingHandle] = useState<ResizeHandleKind | null>(
     null,
   );
+  const [renameDialog, setRenameDialog] = useState<{
+    path: string;
+    nextPath: string;
+    error: string | null;
+  } | null>(null);
+  const [deletePath, setDeletePath] = useState<string | null>(null);
   const revealKeyRef = useRef(0);
   const dragCleanupRef = useRef<(() => void) | null>(null);
   const layoutBodyRef = useRef<HTMLDivElement | null>(null);
@@ -169,11 +240,7 @@ export function WorkspaceCollabLayout({
   const updateBottomPanelHeight = useCallback(
     (nextHeight: number) => {
       setBottomPanelHeight(
-        clamp(
-          nextHeight,
-          BOTTOM_PANEL_MIN_HEIGHT,
-          getMaxBottomPanelHeight(),
-        ),
+        clamp(nextHeight, BOTTOM_PANEL_MIN_HEIGHT, getMaxBottomPanelHeight()),
       );
     },
     [getMaxBottomPanelHeight, setBottomPanelHeight],
@@ -194,11 +261,7 @@ export function WorkspaceCollabLayout({
         clamp(current, RIGHT_PANEL_MIN_WIDTH, getMaxRightPanelWidth()),
       );
       setBottomPanelHeight((current) =>
-        clamp(
-          current,
-          BOTTOM_PANEL_MIN_HEIGHT,
-          getMaxBottomPanelHeight(),
-        ),
+        clamp(current, BOTTOM_PANEL_MIN_HEIGHT, getMaxBottomPanelHeight()),
       );
     };
 
@@ -415,9 +478,12 @@ export function WorkspaceCollabLayout({
   const handleManualSave = useCallback(async () => {
     if (manualSaveInFlight.current) return;
     if (isAutosavePersistSuppressed()) {
-      window.alert(
-        "Salvare checkpoint indisponibilă momentan (restore sau operație în curs). Încearcă după câteva secunde.",
-      );
+      toast({
+        title: "Checkpoint indisponibil momentan",
+        description:
+          "Există un restore sau o operație de sincronizare în curs. Încearcă din nou în câteva secunde.",
+        tone: "warning",
+      });
       return;
     }
     manualSaveInFlight.current = true;
@@ -443,6 +509,11 @@ export function WorkspaceCollabLayout({
       setManualSaveHint(
         `Checkpoint salvat (${timeStr}) · id ${checkpointId.slice(0, 8)}…`,
       );
+      toast({
+        title: "Checkpoint salvat",
+        description: `Istoricul a fost actualizat la ${timeStr}.`,
+        tone: "success",
+      });
       if (manualSaveHintTimerRef.current) {
         clearTimeout(manualSaveHintTimerRef.current);
       }
@@ -451,14 +522,19 @@ export function WorkspaceCollabLayout({
         manualSaveHintTimerRef.current = null;
       }, 4500);
     } catch (e) {
-      window.alert(
-        e instanceof Error ? e.message : "Salvarea checkpoint-ului a eșuat.",
-      );
+      toast({
+        title: "Salvarea checkpoint-ului a eșuat",
+        description:
+          e instanceof Error
+            ? e.message
+            : "Nu am putut salva starea curentă în istoric.",
+        tone: "error",
+      });
     } finally {
       manualSaveInFlight.current = false;
       setManualSaveBusy(false);
     }
-  }, [workspaceId, ydoc]);
+  }, [toast, workspaceId, ydoc]);
 
   useEffect(() => {
     handleManualSaveRef.current = handleManualSave;
@@ -499,15 +575,142 @@ export function WorkspaceCollabLayout({
     },
   });
 
+  const lastRunFingerprintRef = useRef<string | null>(null);
+  const lastRunErrorRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!runner.error || lastRunErrorRef.current === runner.error) return;
+    lastRunErrorRef.current = runner.error;
+    toast({
+      title: "Pipeline indisponibil",
+      description: runner.error,
+      tone: "error",
+    });
+  }, [runner.error, toast]);
+
+  useEffect(() => {
+    if (!runner.job || !TERMINAL_RUN_STATUSES.includes(runner.job.status)) {
+      return;
+    }
+
+    const fingerprint = `${runner.job.id}:${runner.job.status}`;
+    if (lastRunFingerprintRef.current === fingerprint) {
+      return;
+    }
+    lastRunFingerprintRef.current = fingerprint;
+
+    const outcome = describeRunOutcome(runner.job.status);
+    toast({
+      title: outcome.title,
+      description:
+        runner.job.errorMessage ??
+        runner.job.scanReport?.summary ??
+        `Job ${shortId(runner.job.id)} s-a încheiat cu status ${runner.job.status}.`,
+      tone: outcome.tone,
+      durationMs: runner.job.status === "SUCCEEDED" ? 3600 : 5200,
+    });
+  }, [runner.job, toast]);
+
+  const handleCreateFile = useCallback(() => {
+    const path = createUntitledFile(ydoc);
+    setActivePath(path);
+    toast({
+      title: "Fișier creat",
+      description: `${path} este gata pentru editare.`,
+      tone: "success",
+      durationMs: 2600,
+    });
+  }, [toast, ydoc]);
+
+  const handleRenameSubmit = useCallback(() => {
+    if (!renameDialog) return;
+
+    if (!renameFile(ydoc, renameDialog.path, renameDialog.nextPath)) {
+      setRenameDialog((current) =>
+        current
+          ? {
+              ...current,
+              error: "Redenumire invalidă sau fișier existent.",
+            }
+          : current,
+      );
+      return;
+    }
+
+    if (activePath === renameDialog.path) {
+      setActivePath(renameDialog.nextPath.trim());
+    }
+
+    toast({
+      title: "Fișier redenumit",
+      description: `${renameDialog.path} a devenit ${renameDialog.nextPath.trim()}.`,
+      tone: "success",
+      durationMs: 2800,
+    });
+    setRenameDialog(null);
+  }, [activePath, renameDialog, toast, ydoc]);
+
+  const handleDeleteConfirm = useCallback(() => {
+    if (!deletePath) return;
+    deleteFile(ydoc, deletePath);
+    toast({
+      title: "Fișier șters",
+      description: `${deletePath} a fost eliminat din workspace.`,
+      tone: "success",
+      durationMs: 2800,
+    });
+    setDeletePath(null);
+  }, [deletePath, toast, ydoc]);
+
+  const connectionBanners = useMemo(() => {
+    const banners: Array<{
+      key: string;
+      tone: "info" | "warning" | "error";
+      title: string;
+      description: string;
+    }> = [];
+
+    if (!wsConnected) {
+      banners.push({
+        key: "collab-disconnected",
+        tone: "warning",
+        title: "Colaborarea se reconectează",
+        description:
+          "Editările locale rămân vizibile, dar prezența și sincronizarea live pot avea întârzieri scurte până la refacerea socket-ului.",
+      });
+    } else if (!synced) {
+      banners.push({
+        key: "collab-sync",
+        tone: "info",
+        title: "Workspace-ul se aliniază",
+        description:
+          "Refacem documentul colaborativ și checkpoint-urile recente. Evită restore-ul până când statusul revine la sincronizat.",
+      });
+    }
+
+    if (!aiPresenceWs) {
+      banners.push({
+        key: "ai-presence",
+        tone: "warning",
+        title: "Prezența AI e în mod limitat",
+        description:
+          "Sugestiile AI funcționează în continuare, dar indicatorii live de activitate se pot actualiza cu întârziere.",
+      });
+    }
+
+    return banners;
+  }, [aiPresenceWs, synced, wsConnected]);
+
   return (
     <div
       style={{
         display: "flex",
         flexDirection: "column",
         height: "100vh",
-        background: "#1e1e1e",
+        background:
+          "radial-gradient(circle at top, rgba(100, 199, 255, 0.08), transparent 24%), linear-gradient(180deg, #09111a 0%, #0b121b 100%)",
         color: "#ddd",
-        fontFamily: "system-ui, sans-serif",
+        fontFamily: '"Aptos", "Segoe UI", sans-serif',
       }}
     >
       <LocalPresenceBridge
@@ -521,87 +724,227 @@ export function WorkspaceCollabLayout({
           alignItems: "center",
           justifyContent: "space-between",
           flexWrap: "wrap",
-          padding: "8px 12px",
-          borderBottom: "1px solid #333",
-          gap: 12,
+          padding: "14px 16px 12px",
+          borderBottom: "1px solid rgba(130, 160, 192, 0.14)",
+          gap: 16,
+          background: "rgba(8, 14, 22, 0.78)",
+          backdropFilter: "blur(12px)",
         }}
       >
         <div
           style={{
-            fontWeight: 700,
             display: "flex",
-            alignItems: "center",
-            gap: 12,
+            flexDirection: "column",
+            gap: 10,
             flexWrap: "wrap",
           }}
         >
-          <Link
-            to="/"
+          <div
             style={{
-              color: "#8ab4ff",
-              textDecoration: "none",
-              fontWeight: 500,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
             }}
           >
-            ← Dashboard
-          </Link>
-          <span>
-            iTECify · <code style={{ fontSize: 12 }}>{workspaceId}</code>
-          </span>
-          <ShareLinkButton
-            shareToken={shareToken}
-            workspaceName={workspaceName}
-          />
+            <Link
+              to="/"
+              style={{
+                color: "#8ab4ff",
+                textDecoration: "none",
+                fontWeight: 600,
+              }}
+            >
+              ← Dashboard
+            </Link>
+            <span
+              style={{
+                padding: "4px 10px",
+                borderRadius: 999,
+                border: "1px solid rgba(130, 160, 192, 0.18)",
+                background: "rgba(11, 21, 32, 0.72)",
+                fontSize: 11,
+                letterSpacing: "0.1em",
+                textTransform: "uppercase",
+                color: "#8fb7d0",
+              }}
+            >
+              {workspaceTemplate}
+            </span>
+            <span
+              style={{
+                padding: "4px 10px",
+                borderRadius: 999,
+                border: "1px solid rgba(130, 160, 192, 0.18)",
+                background: "rgba(11, 21, 32, 0.72)",
+                fontSize: 11,
+                color: "#7f96aa",
+              }}
+            >
+              {paths.length} fișiere
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 16,
+              flexWrap: "wrap",
+            }}
+          >
+            <div style={{ display: "grid", gap: 5 }}>
+              <div
+                style={{
+                  fontSize: 11,
+                  letterSpacing: "0.12em",
+                  textTransform: "uppercase",
+                  color: "#6f8aa0",
+                }}
+              >
+                Collaborative Workspace
+              </div>
+              <div style={{ fontSize: 24, fontWeight: 700, color: "#f8fbff" }}>
+                {workspaceName}
+              </div>
+            </div>
+            <div
+              style={{
+                padding: "10px 12px",
+                borderRadius: 16,
+                border: "1px solid rgba(130, 160, 192, 0.16)",
+                background: "rgba(11, 21, 32, 0.72)",
+                fontSize: 12,
+                color: "#8ea7bc",
+              }}
+            >
+              id {shortId(workspaceId)}
+            </div>
+            <ShareLinkButton
+              shareToken={shareToken}
+              workspaceName={workspaceName}
+            />
+          </div>
         </div>
         <div
           style={{
             display: "flex",
-            alignItems: "center",
-            gap: 12,
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 10,
             fontSize: 13,
-            opacity: 0.92,
+            opacity: 0.98,
           }}
         >
-          <div>
-            Collab:&nbsp;
-            <span style={{ color: wsConnected ? "#7d7" : "#d77" }}>
-              {wsConnected ? "WebSocket conectat" : "se reconectează…"}
-            </span>
-            &nbsp;·&nbsp;
-            <span style={{ color: synced ? "#7d7" : "#dd7" }}>
-              {synced ? "sincronizat" : "sync…"}
-            </span>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              flexWrap: "wrap",
+              justifyContent: "flex-end",
+            }}
+          >
+            <div
+              style={{
+                padding: "7px 11px",
+                borderRadius: 999,
+                border: "1px solid rgba(130, 160, 192, 0.18)",
+                background: "rgba(11, 21, 32, 0.72)",
+                color: wsConnected ? "#8ee4b8" : "#f2c06a",
+                fontSize: 12,
+                fontWeight: 700,
+              }}
+            >
+              {wsConnected ? "Collab live" : "Collab reconnecting"}
+            </div>
+            <div
+              style={{
+                padding: "7px 11px",
+                borderRadius: 999,
+                border: "1px solid rgba(130, 160, 192, 0.18)",
+                background: "rgba(11, 21, 32, 0.72)",
+                color: synced ? "#8ee4b8" : "#9fd5f7",
+                fontSize: 12,
+                fontWeight: 700,
+              }}
+            >
+              {synced ? "Sincronizat" : "Sync în curs"}
+            </div>
+            <div
+              style={{
+                padding: "7px 11px",
+                borderRadius: 999,
+                border: "1px solid rgba(130, 160, 192, 0.18)",
+                background: "rgba(11, 21, 32, 0.72)",
+                color: aiPresenceWs ? "#d5b8ff" : "#f2c06a",
+                fontSize: 12,
+                fontWeight: 700,
+              }}
+            >
+              {aiPresenceWs ? "AI presence live" : "AI presence limited"}
+            </div>
           </div>
           <div
             style={{
-              padding: "6px 10px",
-              borderRadius: 999,
-              border: "1px solid #3b5164",
-              background: "#142331",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
             }}
           >
-            {currentUser.name} · {currentUser.role}
+            <div
+              style={{
+                padding: "8px 12px",
+                borderRadius: 999,
+                border: "1px solid rgba(130, 160, 192, 0.18)",
+                background: "rgba(11, 21, 32, 0.72)",
+                color: "#d7e4ef",
+              }}
+            >
+              {currentUser.name} · {currentUser.role}
+            </div>
+            <button
+              onClick={() => {
+                void onLogout();
+              }}
+              style={{
+                border: "1px solid rgba(130, 160, 192, 0.22)",
+                background: "transparent",
+                color: "#e5eef6",
+                borderRadius: 12,
+                padding: "8px 12px",
+                cursor: "pointer",
+                fontWeight: 600,
+              }}
+              type="button"
+            >
+              Logout
+            </button>
           </div>
-          <button
-            onClick={() => {
-              void onLogout();
-            }}
-            style={{
-              border: "1px solid #54718c",
-              background: "transparent",
-              color: "#e5eef6",
-              borderRadius: 8,
-              padding: "6px 10px",
-              cursor: "pointer",
-            }}
-            type="button"
-          >
-            Logout
-          </button>
         </div>
       </header>
 
       <CollaboratorStrip peers={peers} aiPresence={aiPresence} />
+
+      {connectionBanners.length > 0 ? (
+        <div
+          style={{
+            display: "grid",
+            gap: 10,
+            padding: "12px 16px 0",
+          }}
+        >
+          {connectionBanners.map((banner) => (
+            <InlineBanner
+              key={banner.key}
+              tone={banner.tone}
+              title={banner.title}
+              description={banner.description}
+            />
+          ))}
+        </div>
+      ) : null}
 
       <div
         ref={layoutBodyRef}
@@ -610,7 +953,7 @@ export function WorkspaceCollabLayout({
           flex: 1,
           minHeight: 0,
           flexDirection: "column",
-          overflowY: "auto",
+          overflow: "hidden",
         }}
       >
         <div
@@ -621,6 +964,8 @@ export function WorkspaceCollabLayout({
             minHeight: TOP_SECTION_MIN_HEIGHT,
             minWidth: 0,
             overflow: "hidden",
+            padding: "14px 16px 0",
+            gap: 0,
           }}
         >
           <div
@@ -630,30 +975,25 @@ export function WorkspaceCollabLayout({
               maxWidth: leftPanelMaxWidth,
               flexShrink: 0,
               minHeight: 0,
+              borderRadius: "20px 0 0 0",
+              overflow: "hidden",
+              boxShadow: "0 20px 40px rgba(0, 0, 0, 0.18)",
             }}
           >
             <FileTree
               activePath={activePath}
               peerFileColors={peerFileColors}
               onSelect={setActivePath}
-              onCreate={() => {
-                const path = createUntitledFile(ydoc);
-                setActivePath(path);
-              }}
+              onCreate={handleCreateFile}
               onRename={(path) => {
-                const next = window.prompt("Cale nouă (ex: src/main.ts)", path);
-                if (next == null) return;
-                if (!renameFile(ydoc, path, next)) {
-                  window.alert("Redenumire invalidă sau fișier existent.");
-                  return;
-                }
-                if (activePath === path) {
-                  setActivePath(next.trim());
-                }
+                setRenameDialog({
+                  path,
+                  nextPath: path,
+                  error: null,
+                });
               }}
               onDelete={(path) => {
-                if (!window.confirm(`Ștergi ${path}?`)) return;
-                deleteFile(ydoc, path);
+                setDeletePath(path);
               }}
               style={{ width: "100%", height: "100%" }}
             />
@@ -681,6 +1021,10 @@ export function WorkspaceCollabLayout({
               minWidth: CENTER_PANEL_MIN_WIDTH,
               minHeight: 0,
               overflow: "hidden",
+              borderTop: "1px solid rgba(130, 160, 192, 0.12)",
+              borderBottom: "1px solid rgba(130, 160, 192, 0.12)",
+              background: "rgba(6, 12, 19, 0.62)",
+              boxShadow: "inset 0 0 0 1px rgba(130, 160, 192, 0.06)",
             }}
           >
             <CollabMonacoEditor
@@ -717,6 +1061,9 @@ export function WorkspaceCollabLayout({
               maxWidth: rightPanelMaxWidth,
               flexShrink: 0,
               minHeight: 0,
+              borderRadius: "0 20px 0 0",
+              overflow: "hidden",
+              boxShadow: "0 20px 40px rgba(0, 0, 0, 0.18)",
             }}
           >
             <AiSuggestionsSidebar
@@ -760,13 +1107,15 @@ export function WorkspaceCollabLayout({
             display: "flex",
             flexDirection: "column",
             overflow: "hidden",
-            background: "#0f1419",
+            background:
+              "linear-gradient(180deg, rgba(9, 15, 23, 0.98) 0%, rgba(7, 12, 20, 0.98) 100%)",
+            borderTop: "1px solid rgba(130, 160, 192, 0.12)",
           }}
         >
           <div
             style={{
               flexShrink: 0,
-              borderBottom: "1px solid #2a3340",
+              borderBottom: "1px solid rgba(130, 160, 192, 0.12)",
             }}
           >
             <div
@@ -775,7 +1124,7 @@ export function WorkspaceCollabLayout({
                 flexWrap: "wrap",
                 alignItems: "flex-end",
                 gap: 8,
-                padding: "6px 10px 0",
+                padding: "10px 12px 0",
               }}
             >
               <div
@@ -784,7 +1133,7 @@ export function WorkspaceCollabLayout({
                 style={{
                   display: "flex",
                   flexWrap: "wrap",
-                  gap: 4,
+                  gap: 6,
                   flex: "1 1 200px",
                   minWidth: 0,
                 }}
@@ -799,22 +1148,21 @@ export function WorkspaceCollabLayout({
                     setBottomTab("run");
                   }}
                   style={{
-                    padding: "8px 14px",
+                    padding: "10px 15px",
                     fontSize: 13,
-                    fontWeight: 600,
-                    border: "none",
-                    borderRadius: "8px 8px 0 0",
+                    fontWeight: 700,
+                    border: "1px solid transparent",
+                    borderRadius: 12,
                     cursor: "pointer",
                     background:
                       bottomTab === "run"
-                        ? "rgba(56, 189, 248, 0.12)"
+                        ? "linear-gradient(180deg, rgba(15, 74, 109, 0.78), rgba(10, 51, 76, 0.92))"
                         : "transparent",
-                    color: bottomTab === "run" ? "#e5eef6" : "#94a8c4",
-                    borderBottom:
+                    color: bottomTab === "run" ? "#eef9ff" : "#8ea7bc",
+                    borderColor:
                       bottomTab === "run"
-                        ? "2px solid #38bdf8"
-                        : "2px solid transparent",
-                    marginBottom: -1,
+                        ? "rgba(100, 199, 255, 0.24)"
+                        : "rgba(130, 160, 192, 0.14)",
                   }}
                 >
                   Run Pipeline
@@ -829,22 +1177,21 @@ export function WorkspaceCollabLayout({
                     setBottomTab("history");
                   }}
                   style={{
-                    padding: "8px 14px",
+                    padding: "10px 15px",
                     fontSize: 13,
-                    fontWeight: 600,
-                    border: "none",
-                    borderRadius: "8px 8px 0 0",
+                    fontWeight: 700,
+                    border: "1px solid transparent",
+                    borderRadius: 12,
                     cursor: "pointer",
                     background:
                       bottomTab === "history"
-                        ? "rgba(56, 189, 248, 0.12)"
+                        ? "linear-gradient(180deg, rgba(15, 74, 109, 0.78), rgba(10, 51, 76, 0.92))"
                         : "transparent",
-                    color: bottomTab === "history" ? "#e5eef6" : "#94a8c4",
-                    borderBottom:
+                    color: bottomTab === "history" ? "#eef9ff" : "#8ea7bc",
+                    borderColor:
                       bottomTab === "history"
-                        ? "2px solid #38bdf8"
-                        : "2px solid transparent",
-                    marginBottom: -1,
+                        ? "rgba(100, 199, 255, 0.24)"
+                        : "rgba(130, 160, 192, 0.14)",
                   }}
                 >
                   Istoric & replay
@@ -859,22 +1206,21 @@ export function WorkspaceCollabLayout({
                     setBottomTab("terminal");
                   }}
                   style={{
-                    padding: "8px 14px",
+                    padding: "10px 15px",
                     fontSize: 13,
-                    fontWeight: 600,
-                    border: "none",
-                    borderRadius: "8px 8px 0 0",
+                    fontWeight: 700,
+                    border: "1px solid transparent",
+                    borderRadius: 12,
                     cursor: "pointer",
                     background:
                       bottomTab === "terminal"
-                        ? "rgba(56, 189, 248, 0.12)"
+                        ? "linear-gradient(180deg, rgba(15, 74, 109, 0.78), rgba(10, 51, 76, 0.92))"
                         : "transparent",
-                    color: bottomTab === "terminal" ? "#e5eef6" : "#94a8c4",
-                    borderBottom:
+                    color: bottomTab === "terminal" ? "#eef9ff" : "#8ea7bc",
+                    borderColor:
                       bottomTab === "terminal"
-                        ? "2px solid #38bdf8"
-                        : "2px solid transparent",
-                    marginBottom: -1,
+                        ? "rgba(100, 199, 255, 0.24)"
+                        : "rgba(130, 160, 192, 0.14)",
                   }}
                 >
                   Terminal
@@ -888,34 +1234,34 @@ export function WorkspaceCollabLayout({
                   void handleManualSave();
                 }}
                 style={{
-                  padding: "8px 14px",
+                  padding: "10px 15px",
                   fontSize: 13,
-                  fontWeight: 600,
-                  borderRadius: 8,
+                  fontWeight: 700,
+                  borderRadius: 12,
                   cursor: manualSaveBusy ? "wait" : "pointer",
-                  border: "1px solid rgba(56, 189, 248, 0.45)",
-                  background: "rgba(56, 189, 248, 0.14)",
-                  color: "#e0f2fe",
+                  border: "1px solid rgba(45, 212, 191, 0.26)",
+                  background:
+                    "linear-gradient(180deg, rgba(16, 104, 99, 0.88), rgba(11, 74, 69, 0.96))",
+                  color: "#effffc",
                   opacity: manualSaveBusy ? 0.75 : 1,
                   whiteSpace: "nowrap",
                   marginBottom: 2,
                 }}
               >
-                {manualSaveBusy ? "Se salvează checkpoint…" : "Salvează checkpoint"}
+                {manualSaveBusy
+                  ? "Se salvează checkpoint…"
+                  : "Salvează checkpoint"}
               </button>
             </div>
           </div>
           {manualSaveHint ? (
-            <div
-              role="status"
-              style={{
-                padding: "4px 10px 6px",
-                fontSize: 12,
-                color: "#86efac",
-                flexShrink: 0,
-              }}
-            >
-              {manualSaveHint}
+            <div style={{ padding: "10px 12px 0", flexShrink: 0 }}>
+              <InlineBanner
+                tone="success"
+                title="Checkpoint pregătit"
+                description={manualSaveHint}
+                compact={true}
+              />
             </div>
           ) : null}
 
@@ -929,7 +1275,7 @@ export function WorkspaceCollabLayout({
               minHeight: 0,
               display: bottomTab === "run" ? "flex" : "none",
               flexDirection: "column",
-              overflow: "auto",
+              overflow: "hidden",
             }}
           >
             <RunPanel
@@ -1003,6 +1349,131 @@ export function WorkspaceCollabLayout({
           </div>
         </div>
       </div>
+
+      <Dialog
+        open={renameDialog != null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRenameDialog(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              handleRenameSubmit();
+            }}
+          >
+            <DialogHeader>
+              <DialogTitle>Redenumește fișierul</DialogTitle>
+              <DialogDescription>
+                Mută fișierul într-o cale nouă fără să pierzi conținutul
+                colaborativ existent.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div style={{ display: "grid", gap: 8, marginTop: 16 }}>
+              <label
+                htmlFor="rename-workspace-path"
+                style={{ fontSize: 12, color: "#94a8c4", fontWeight: 600 }}
+              >
+                Cale nouă
+              </label>
+              <input
+                id="rename-workspace-path"
+                data-autofocus="true"
+                value={renameDialog?.nextPath ?? ""}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setRenameDialog((current) =>
+                    current
+                      ? {
+                          ...current,
+                          nextPath: value,
+                          error: null,
+                        }
+                      : current,
+                  );
+                }}
+                placeholder="src/main.ts"
+                style={{
+                  width: "100%",
+                  boxSizing: "border-box",
+                  borderRadius: 14,
+                  border: "1px solid rgba(130, 160, 192, 0.24)",
+                  background: "rgba(8, 14, 22, 0.9)",
+                  color: "#e7eef7",
+                  padding: "12px 14px",
+                }}
+              />
+              {renameDialog?.error ? (
+                <InlineBanner
+                  tone="error"
+                  title="Redenumire invalidă"
+                  description={renameDialog.error}
+                  compact={true}
+                />
+              ) : null}
+            </div>
+
+            <DialogFooter>
+              <button
+                type="button"
+                onClick={() => {
+                  setRenameDialog(null);
+                }}
+                style={secondaryActionButtonStyle}
+              >
+                Anulează
+              </button>
+              <button type="submit" style={primaryActionButtonStyle}>
+                Confirmă redenumirea
+              </button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog
+        open={deletePath != null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeletePath(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Ștergi acest fișier?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deletePath
+                ? `${deletePath} va fi eliminat din workspace pentru toți colaboratorii activi.`
+                : "Fișierul selectat va fi eliminat din workspace pentru toți colaboratorii activi."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <AlertDialogFooter>
+            <button
+              type="button"
+              onClick={() => {
+                setDeletePath(null);
+              }}
+              style={secondaryActionButtonStyle}
+            >
+              Păstrează fișierul
+            </button>
+            <button
+              type="button"
+              data-autofocus="true"
+              onClick={handleDeleteConfirm}
+              style={dangerActionButtonStyle}
+            >
+              Șterge definitiv
+            </button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -1064,6 +1535,38 @@ function ResizeHandle({
     </div>
   );
 }
+
+const secondaryActionButtonStyle: CSSProperties = {
+  border: "1px solid rgba(130, 160, 192, 0.24)",
+  background: "transparent",
+  color: "#c9d7e5",
+  borderRadius: 12,
+  padding: "10px 14px",
+  cursor: "pointer",
+  fontWeight: 600,
+};
+
+const primaryActionButtonStyle: CSSProperties = {
+  border: "1px solid rgba(100, 199, 255, 0.28)",
+  background:
+    "linear-gradient(180deg, rgba(15, 74, 109, 0.78), rgba(10, 51, 76, 0.92))",
+  color: "#d8f0ff",
+  borderRadius: 12,
+  padding: "10px 14px",
+  cursor: "pointer",
+  fontWeight: 700,
+};
+
+const dangerActionButtonStyle: CSSProperties = {
+  border: "1px solid rgba(255, 123, 123, 0.32)",
+  background:
+    "linear-gradient(180deg, rgba(116, 21, 34, 0.9), rgba(78, 14, 23, 0.98))",
+  color: "#ffe0e0",
+  borderRadius: 12,
+  padding: "10px 14px",
+  cursor: "pointer",
+  fontWeight: 700,
+};
 
 function useStoredBottomTab(
   key: string,

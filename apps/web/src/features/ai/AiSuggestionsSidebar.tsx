@@ -8,9 +8,14 @@ import {
 } from "react";
 import * as Y from "yjs";
 import type { Map as YMap, Text as YText } from "yjs";
-import type { TargetRange } from "@itecify/shared/ai";
+import {
+  resolveSuggestionPatchInText,
+  type TargetRange,
+} from "@itecify/shared/ai";
 import type { AiSuggestionPersisted } from "@itecify/shared/ai";
 import { SuggestionCard } from "../../components/suggestions/SuggestionCard.js";
+import { InlineBanner } from "../../components/ui/inline-banner.js";
+import { useToast } from "../../components/ui/toast.js";
 import {
   createAiSuggestions,
   listAiSuggestions,
@@ -49,6 +54,7 @@ export function AiSuggestionsSidebar({
   onRequestReveal: (filePath: string, range: TargetRange) => void;
   style?: CSSProperties;
 }): ReactNode {
+  const { toast } = useToast();
   const [instruction, setInstruction] = useState(
     "Îmbunătățește claritatea și adaugă un comentariu scurt la începutul fișierului.",
   );
@@ -59,6 +65,7 @@ export function AiSuggestionsSidebar({
   const [conflictIds, setConflictIds] = useState<Set<string>>(() => new Set());
   const standbyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
+  const acceptInFlightRef = useRef<Set<string>>(new Set());
 
   const refresh = useCallback(async () => {
     try {
@@ -122,6 +129,12 @@ export function AiSuggestionsSidebar({
         contextFiles: [{ path: activePath, content: ytext.toString() }],
       });
 
+      toast({
+        title: "Sugestii AI generate",
+        description: `Rezultatele pentru ${activePath} sunt gata de review.`,
+        tone: "success",
+      });
+
       sendAiPresence({
         status: "ready",
         filePath: activePath,
@@ -137,6 +150,11 @@ export function AiSuggestionsSidebar({
             ? e.message
             : "Cererea AI a eșuat.";
       setError(msg);
+      toast({
+        title: "Cererea AI a eșuat",
+        description: msg,
+        tone: "error",
+      });
       sendAiPresence({
         status: "failed",
         filePath: activePath,
@@ -159,17 +177,44 @@ export function AiSuggestionsSidebar({
         n.delete(id);
         return n;
       });
+      toast({
+        title: "Sugestie respinsă",
+        description: "Am scos sugestia din lista de pending.",
+        tone: "info",
+        durationMs: 2600,
+      });
       await refresh();
     } catch (e) {
-      setError(e instanceof ApiClientError ? e.message : "Respingere eșuată.");
+      const message =
+        e instanceof ApiClientError ? e.message : "Respingere eșuată.";
+      setError(message);
+      toast({
+        title: "Respingerea a eșuat",
+        description: message,
+        tone: "error",
+      });
     } finally {
       setActionBusyId(null);
     }
   }
 
   async function doAccept(id: string, force: boolean): Promise<void> {
+    if (acceptInFlightRef.current.has(id)) return;
+
     const s = pending.find((x) => x.id === id);
     if (!s?.filePath || !s.targetRange || !s.operationType) return;
+
+    if (s.sourceSpanText == null) {
+      const message =
+        "Sugestia AI nu are un anchor valid în fișierul generat. Generează din nou înainte să aplici.";
+      setError(message);
+      toast({
+        title: "Sugestie nesigură",
+        description: message,
+        tone: "error",
+      });
+      return;
+    }
 
     const ytext = files.get(s.filePath);
     if (!ytext) {
@@ -178,14 +223,58 @@ export function AiSuggestionsSidebar({
     }
 
     const fileText = ytext.toString();
+    const resolvedPatch = resolveSuggestionPatchInText(
+      fileText,
+      s.operationType,
+      s.targetRange,
+      s.replacementText ?? "",
+      s.sourceSpanText,
+    );
+    if (resolvedPatch.wasClamped) {
+      setConflictIds((prev) => new Set(prev).add(id));
+      setError(
+        "Fișierul s-a schimbat sau intervalul propus nu mai este valid. Revizuiește conflictul și regenerează sugestia.",
+      );
+      return;
+    }
+
+    if (resolvedPatch.validationError) {
+      setError(resolvedPatch.validationError);
+      toast({
+        title: "Sugestie AI invalidă",
+        description: resolvedPatch.validationError,
+        tone: "error",
+      });
+      return;
+    }
+
+    if (resolvedPatch.isNoop) {
+      const message =
+        "Sugestia AI nu schimbă nimic în fișier. Generează din nou o propunere mai precisă.";
+      setError(message);
+      toast({
+        title: "Sugestie fără efect",
+        description: message,
+        tone: "warning",
+      });
+      return;
+    }
+
     const conflict =
       !force &&
-      hasSuggestionConflict(fileText, s.targetRange, s.sourceSpanText);
+      hasSuggestionConflict(
+        fileText,
+        s.operationType,
+        s.targetRange,
+        s.replacementText ?? "",
+        s.sourceSpanText,
+      );
     if (conflict) {
       setConflictIds((prev) => new Set(prev).add(id));
       return;
     }
 
+    acceptInFlightRef.current.add(id);
     setActionBusyId(id);
     setError(null);
     try {
@@ -217,10 +306,24 @@ export function AiSuggestionsSidebar({
         n.delete(id);
         return n;
       });
+      toast({
+        title: "Sugestie aplicată",
+        description: checkpointOk
+          ? "Editorul a fost actualizat și checkpoint-ul a fost salvat în istoric."
+          : "Editorul a fost actualizat. Checkpoint-ul nu a putut fi înregistrat în istoric.",
+        tone: checkpointOk ? "success" : "warning",
+      });
       await refresh();
     } catch (e) {
-      setError(e instanceof ApiClientError ? e.message : "Accept eșuat.");
+      const message = e instanceof ApiClientError ? e.message : "Accept eșuat.";
+      setError(message);
+      toast({
+        title: "Aplicarea sugestiei a eșuat",
+        description: message,
+        tone: "error",
+      });
     } finally {
+      acceptInFlightRef.current.delete(id);
       setActionBusyId(null);
     }
   }
@@ -228,7 +331,7 @@ export function AiSuggestionsSidebar({
   return (
     <aside
       style={{
-        width: 360,
+        width: "100%",
         height: "100%",
         minWidth: 0,
         flexShrink: 0,
@@ -242,8 +345,8 @@ export function AiSuggestionsSidebar({
     >
       <div
         style={{
-          padding: "12px 12px 10px",
-          borderBottom: "1px solid #2a3340",
+          padding: "14px 14px 12px",
+          borderBottom: "1px solid rgba(130, 160, 192, 0.12)",
         }}
       >
         <div
@@ -256,6 +359,18 @@ export function AiSuggestionsSidebar({
           }}
         >
           GENERARE AI
+        </div>
+        <div
+          style={{
+            fontSize: 13,
+            color: "#dce7f2",
+            fontWeight: 700,
+            marginBottom: 8,
+          }}
+        >
+          {activePath
+            ? activePath
+            : "Selectează un fișier pentru a cere sugestii"}
         </div>
         <textarea
           value={instruction}
@@ -276,6 +391,16 @@ export function AiSuggestionsSidebar({
             fontFamily: "ui-monospace, monospace",
           }}
         />
+        {!activePath ? (
+          <div style={{ marginTop: 8 }}>
+            <InlineBanner
+              tone="info"
+              title="Alege un fișier activ"
+              description="Panoul AI lucrează întotdeauna pe fișierul selectat din explorer sau din editor."
+              compact={true}
+            />
+          </div>
+        ) : null}
         <button
           type="button"
           disabled={genBusy || !activePath || !aiPresenceChannelReady}
@@ -283,11 +408,13 @@ export function AiSuggestionsSidebar({
           style={{
             marginTop: 8,
             width: "100%",
-            border: "1px solid #5b4fc9",
-            background: genBusy ? "#2d2654" : "#3d2f7a",
-            color: "#ede9fe",
-            borderRadius: 8,
-            padding: "8px 12px",
+            border: "1px solid rgba(100, 199, 255, 0.26)",
+            background: genBusy
+              ? "rgba(14, 44, 63, 0.92)"
+              : "linear-gradient(180deg, rgba(15, 74, 109, 0.78), rgba(10, 51, 76, 0.92))",
+            color: "#eef9ff",
+            borderRadius: 12,
+            padding: "10px 12px",
             cursor: genBusy ? "wait" : "pointer",
             fontWeight: 700,
             fontSize: 13,
@@ -308,7 +435,7 @@ export function AiSuggestionsSidebar({
           fontWeight: 700,
           letterSpacing: "0.08em",
           color: "#94a8c4",
-          padding: "10px 12px 6px",
+          padding: "12px 14px 6px",
         }}
       >
         ÎN AȘTEPTARE ({pending.length})
@@ -325,24 +452,20 @@ export function AiSuggestionsSidebar({
         }}
       >
         {error ? (
-          <div
-            style={{
-              fontSize: 12,
-              color: "#fca5a5",
-              background: "rgba(127,29,29,0.35)",
-              border: "1px solid #7f1d1d",
-              borderRadius: 8,
-              padding: "8px 10px",
-            }}
-          >
-            {error}
-          </div>
+          <InlineBanner
+            tone="error"
+            title="Acțiunea AI nu s-a finalizat"
+            description={error}
+            compact={true}
+          />
         ) : null}
 
         {pending.length === 0 ? (
-          <div style={{ fontSize: 12, color: "#64748b", padding: "8px 4px" }}>
-            Nicio sugestie în așteptare. Generează din fișierul activ.
-          </div>
+          <InlineBanner
+            tone="info"
+            title="Nicio sugestie în așteptare"
+            description="Folosește instrucțiunea de mai sus pentru a genera un nou batch de propuneri pe fișierul activ."
+          />
         ) : (
           pending.map((s) => (
             <SuggestionCard

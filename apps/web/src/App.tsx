@@ -3,11 +3,13 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import type { UserDto } from "@itecify/shared/auth";
 import { getCurrentUser, logout } from "./lib/api/authApi.js";
 import { ApiClientError } from "./lib/api/client.js";
+import { useToast } from "./components/ui/toast.js";
 import { AuthPage } from "./routes/login/AuthPage.js";
 import { DashboardPage } from "./routes/dashboard/DashboardPage.js";
 import { WorkspaceShell } from "./routes/workspace/WorkspaceShell.js";
 
 export function App(): ReactNode {
+  const { toast } = useToast();
   const [currentUser, setCurrentUser] = useState<UserDto | null>(null);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -84,7 +86,11 @@ export function App(): ReactNode {
       setCurrentUser(null);
     } catch (error) {
       console.error("Logout failed.", error);
-      window.alert("Logout-ul a eșuat. Încearcă din nou.");
+      toast({
+        title: "Logout-ul a eșuat",
+        description: "Sesiunea nu a putut fi închisă acum. Încearcă din nou.",
+        tone: "error",
+      });
     }
   }
 

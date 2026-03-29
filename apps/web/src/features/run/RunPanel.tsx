@@ -6,6 +6,7 @@ import type {
   RunStageStatusDto,
   RunTemplateDto,
 } from "@itecify/shared/runner";
+import { InlineBanner } from "../../components/ui/inline-banner.js";
 import type { RunStreamState } from "./useWorkspaceRun.js";
 
 function formatDuration(ms: number): string {
@@ -204,6 +205,95 @@ function buildTerminalStageState(
   }
 }
 
+function buildRunBanner(props: {
+  job: RunJobPublicDto | null;
+  error: string | null;
+  isStarting: boolean;
+  streamState: RunStreamState;
+}): {
+  tone: "info" | "success" | "warning" | "error";
+  title: string;
+  description: string;
+} | null {
+  if (props.error) {
+    return {
+      tone: "error",
+      title: "Pipeline indisponibil",
+      description: props.error,
+    };
+  }
+
+  if (props.isStarting) {
+    return {
+      tone: "info",
+      title: "Pregătim rularea",
+      description:
+        "Persist starea curentă a workspace-ului înainte de scan, build și execuție.",
+    };
+  }
+
+  if (!props.job) {
+    return {
+      tone: "info",
+      title: "Pipeline gata de pornire",
+      description:
+        "Lansează scanarea de securitate, build-ul și execuția sandbox dintr-un singur flux.",
+    };
+  }
+
+  if (props.job.status === "BLOCKED") {
+    return {
+      tone: "warning",
+      title: "Execuția a fost blocată",
+      description:
+        props.job.errorMessage ??
+        props.job.scanReport?.summary ??
+        "Semgrep a oprit rularea pe baza politicilor active.",
+    };
+  }
+
+  if (props.job.status === "TIMEOUT") {
+    return {
+      tone: "warning",
+      title: "Execuția a depășit timpul permis",
+      description:
+        props.job.errorMessage ??
+        "Unul dintre pașii pipeline-ului a atins timeout-ul configurat.",
+    };
+  }
+
+  if (props.job.status === "FAILED" || props.job.status === "CANCELLED") {
+    return {
+      tone: "error",
+      title: "Pipeline-ul s-a oprit cu eroare",
+      description:
+        props.job.errorMessage ??
+        "Verifică etapele și logurile pentru cauza exactă a opririi.",
+    };
+  }
+
+  if (props.job.status === "SUCCEEDED") {
+    return {
+      tone: "success",
+      title: "Pipeline finalizat cu succes",
+      description:
+        "Scanarea, build-ul și rularea s-au încheiat fără blocaje critice.",
+    };
+  }
+
+  return {
+    tone: props.streamState === "reconnecting" ? "warning" : "info",
+    title:
+      props.streamState === "reconnecting"
+        ? "Fluxul live se reconectează"
+        : "Pipeline activ",
+    description:
+      props.streamState === "reconnecting"
+        ? "Logurile live revin imediat ce fluxul SSE se reconectează."
+        : "Urmărește etapele de mai jos și logurile live din timpul rulării.",
+  };
+}
+
 export function RunPanel(props: {
   job: RunJobPublicDto | null;
   liveLogs: RunLogEntryDto[];
@@ -251,6 +341,7 @@ export function RunPanel(props: {
     props.liveLogs.length === 0 &&
     job != null &&
     (job.stdout.length > 0 || job.stderr.length > 0);
+  const banner = buildRunBanner(props);
 
   return (
     <section
@@ -262,6 +353,10 @@ export function RunPanel(props: {
         display: "flex",
         flexDirection: "column",
         gap: 14,
+        flex: 1,
+        minHeight: 0,
+        minWidth: 0,
+        overflow: "auto",
       }}
     >
       <div
@@ -274,6 +369,23 @@ export function RunPanel(props: {
         }}
       >
         <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+              width: "fit-content",
+              borderRadius: 999,
+              border: "1px solid rgba(130, 160, 192, 0.18)",
+              padding: "6px 10px",
+              fontSize: 11,
+              color: "#8fb7d0",
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+            }}
+          >
+            {props.template} sandbox
+          </div>
           <div style={{ fontSize: 18, fontWeight: 700, color: "#f8fafc" }}>
             Run Pipeline
           </div>
@@ -330,6 +442,14 @@ export function RunPanel(props: {
           </button>
         </div>
       </div>
+
+      {banner ? (
+        <InlineBanner
+          tone={banner.tone}
+          title={banner.title}
+          description={banner.description}
+        />
+      ) : null}
 
       <div
         style={{

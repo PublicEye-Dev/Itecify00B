@@ -1,4 +1,5 @@
 import { type CSSProperties, type ReactNode, useState } from "react";
+import { computeSuggestionTextDelta } from "@itecify/shared/ai";
 import type { AiSuggestionPersisted } from "@itecify/shared/ai";
 import { SuggestionDiffPreview } from "./SuggestionDiffPreview.js";
 
@@ -20,7 +21,15 @@ export function SuggestionCard({
   onForceAccept: () => void;
 }): ReactNode {
   const [expanded, setExpanded] = useState(true);
-  const op = suggestion.operationType ?? "REPLACE";
+  const rawOperation = suggestion.operationType ?? "REPLACE";
+  const normalizedDelta = computeSuggestionTextDelta(
+    rawOperation,
+    suggestion.sourceSpanText ?? "",
+    rawOperation === "DELETE" ? "" : (suggestion.replacementText ?? ""),
+  );
+  const op = normalizedDelta.isNoop
+    ? rawOperation
+    : normalizedDelta.operationType;
   const explanation = suggestion.explanation ?? "";
   const conf =
     suggestion.confidence != null
@@ -29,9 +38,24 @@ export function SuggestionCard({
 
   return (
     <div style={cardStyle}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "flex-start" }}>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 8,
+          alignItems: "flex-start",
+        }}
+      >
         <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 11, color: "#a78bfa", fontWeight: 700, letterSpacing: "0.04em" }}>
+          <div
+            style={{
+              fontSize: 11,
+              color: "#7dd3fc",
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+            }}
+          >
             AI · {op}
           </div>
           <div
@@ -52,10 +76,10 @@ export function SuggestionCard({
           style={{
             flexShrink: 0,
             fontSize: 11,
-            border: "1px solid #475569",
-            background: "#1e293b",
-            color: "#94a3b8",
-            borderRadius: 6,
+            border: "1px solid rgba(130, 160, 192, 0.18)",
+            background: "rgba(8, 14, 22, 0.88)",
+            color: "#94a8c4",
+            borderRadius: 8,
             padding: "4px 8px",
             cursor: "pointer",
           }}
@@ -76,23 +100,30 @@ export function SuggestionCard({
             fontSize: 12,
           }}
         >
-          Fișierul s-a schimbat față de snapshot-ul AI. Acceptă doar dacă ești sigur sau forțează
-          aplicarea.
+          Fișierul s-a schimbat față de snapshot-ul AI. Acceptă doar dacă ești
+          sigur sau forțează aplicarea.
         </div>
       ) : null}
 
       {expanded ? (
         <>
-          <p style={{ fontSize: 12, color: "#cbd5e1", margin: "10px 0 6px", lineHeight: 1.45 }}>
+          <p
+            style={{
+              fontSize: 12,
+              color: "#cbd5e1",
+              margin: "10px 0 6px",
+              lineHeight: 1.45,
+            }}
+          >
             {explanation}
           </p>
-          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>Încredere: {conf}</div>
+          <div style={{ fontSize: 11, color: "#64748b", marginBottom: 8 }}>
+            Încredere: {conf}
+          </div>
           <SuggestionDiffPreview
             operationType={op}
-            sourceLabel={suggestion.sourceSpanText ?? ""}
-            replacementLabel={
-              op === "DELETE" ? "" : (suggestion.replacementText ?? "")
-            }
+            sourceLabel={normalizedDelta.sourceText}
+            replacementLabel={normalizedDelta.replacementText}
           />
         </>
       ) : null}
@@ -138,11 +169,12 @@ export function SuggestionCard({
 }
 
 const cardStyle: CSSProperties = {
-  padding: "12px 12px 14px",
-  borderRadius: 10,
-  border: "1px solid rgba(109, 40, 217, 0.45)",
-  background: "linear-gradient(165deg, rgba(30,27,46,0.98) 0%, rgba(15,17,28,0.98) 100%)",
-  boxShadow: "0 4px 24px rgba(0,0,0,0.35)",
+  padding: "13px 13px 14px",
+  borderRadius: 16,
+  border: "1px solid rgba(100, 199, 255, 0.18)",
+  background:
+    "linear-gradient(165deg, rgba(15,22,33,0.98) 0%, rgba(8,12,20,0.98) 100%)",
+  boxShadow: "0 10px 30px rgba(0,0,0,0.22)",
 };
 
 const btnBase: CSSProperties = {
@@ -156,28 +188,29 @@ const btnBase: CSSProperties = {
 
 const btnPrimary: CSSProperties = {
   ...btnBase,
-  background: "linear-gradient(180deg, #5b21b6, #4c1d95)",
-  color: "#f5f3ff",
-  borderColor: "#7c3aed",
+  background:
+    "linear-gradient(180deg, rgba(15, 74, 109, 0.78), rgba(10, 51, 76, 0.92))",
+  color: "#eef9ff",
+  borderColor: "rgba(100, 199, 255, 0.24)",
 };
 
 const btnDanger: CSSProperties = {
   ...btnBase,
   background: "transparent",
-  color: "#fca5a5",
-  borderColor: "#7f1d1d",
+  color: "#ffb4b4",
+  borderColor: "rgba(255, 123, 123, 0.28)",
 };
 
 const btnSecondary: CSSProperties = {
   ...btnBase,
-  background: "#1e293b",
+  background: "rgba(8, 14, 22, 0.92)",
   color: "#e2e8f0",
-  borderColor: "#475569",
+  borderColor: "rgba(130, 160, 192, 0.16)",
 };
 
 const btnWarn: CSSProperties = {
   ...btnBase,
-  background: "rgba(180, 83, 9, 0.35)",
+  background: "rgba(180, 83, 9, 0.28)",
   color: "#fef3c7",
-  borderColor: "#b45309",
+  borderColor: "rgba(246, 196, 83, 0.24)",
 };
