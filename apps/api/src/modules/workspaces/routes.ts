@@ -8,6 +8,12 @@ import {
 } from "@itecify/shared/workspaces";
 import type { FastifyInstance } from "fastify";
 import {
+  getCheckpointSnapshot,
+  listCheckpoints,
+  recordCheckpoint,
+  restoreCheckpoint,
+} from "../snapshots/checkpoint.service.js";
+import {
   loadLatestSnapshot,
   saveSnapshot,
 } from "../snapshots/snapshot.service.js";
@@ -128,6 +134,64 @@ export async function registerWorkspaceRoutes(
         request.body,
       );
       return reply.send({ ok: true });
+    },
+  );
+
+  app.get<{ Params: { workspaceId: string } }>(
+    "/workspaces/:workspaceId/snapshot/checkpoints",
+    { preHandler: [app.authenticate] },
+    async (request) => {
+      return listCheckpoints(
+        app.prisma,
+        request.auth!.user.id,
+        request.params.workspaceId,
+      );
+    },
+  );
+
+  app.get<{
+    Params: { workspaceId: string; checkpointId: string };
+  }>(
+    "/workspaces/:workspaceId/snapshot/checkpoints/:checkpointId",
+    { preHandler: [app.authenticate] },
+    async (request) => {
+      const snapshot = await getCheckpointSnapshot(
+        app.prisma,
+        request.auth!.user.id,
+        request.params.workspaceId,
+        request.params.checkpointId,
+      );
+      return snapshot;
+    },
+  );
+
+  app.post<{ Params: { workspaceId: string }; Body: unknown }>(
+    "/workspaces/:workspaceId/snapshot/checkpoints",
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const result = await recordCheckpoint(
+        app.prisma,
+        request.auth!.user.id,
+        request.params.workspaceId,
+        request.body,
+      );
+      return reply.send(result);
+    },
+  );
+
+  app.post<{
+    Params: { workspaceId: string; checkpointId: string };
+  }>(
+    "/workspaces/:workspaceId/snapshot/checkpoints/:checkpointId/restore",
+    { preHandler: [app.authenticate] },
+    async (request, reply) => {
+      const result = await restoreCheckpoint(
+        app.prisma,
+        request.auth!.user.id,
+        request.params.workspaceId,
+        request.params.checkpointId,
+      );
+      return reply.send(result);
     },
   );
 }

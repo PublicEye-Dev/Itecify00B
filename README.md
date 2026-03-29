@@ -89,6 +89,19 @@ WebSocket Yjs: `ws://localhost:1234` (același server ca health-ul de mai sus).
 
 Variabile utile în `.env`: `VITE_API_URL`, `VITE_COLLAB_WS_URL`.
 
+### Time-travel replay (checkpoint snapshots)
+
+- **Istoric:** la fiecare autosave reușit (debounce + limită pe server), înainte de **Run Pipeline** și după **accept** pe o sugestie AI se creează înregistrări în `workspace_snapshot_checkpoints` (vezi migrația Prisma).
+- **API:** `GET /workspaces/:id/snapshot/checkpoints` (metadate), `GET /workspaces/:id/snapshot/checkpoints/:checkpointId` (payload `WorkspaceSnapshotV1`), `POST /workspaces/:id/snapshot/checkpoints` (înregistrare explicită), `POST .../restore` (restaurare canonică + notificare collab opțională).
+- **UI:** în workspace, panoul **Istoric & replay** — slider pe cronologie, previzualizare **doar citire** (Monaco read-only pe un `Y.Doc` separat), buton **Restaurează acest checkpoint** cu confirmare.
+- **Restaurare sigură:** API actualizează `workspaces.snapshot`; dacă `COLLAB_HTTP_URL` și `COLLAB_ROOM_RESTORE_SECRET` (același secret ca pe serverul collab) sunt setate, API apelează `POST /room/restore` pe collab ca să înlocuiască documentul Yjs din memorie pentru acel room (închide conexiunile WS existente). După restaurare, pagina se reîncarcă. Colaboratorii trebuie să își reîmprospăteze tabul ca să vadă aceeași versiune.
+- Fără secret collab: restaurarea rămâne persistată în Postgres, dar room-ul Yjs poate rămâne desincron până la repornire collab sau refresh coordonat — vezi variabilele de mai jos.
+
+Variabile opționale (același secret în `.env` pentru **API** și **apps/collab**):
+
+- `COLLAB_HTTP_URL` — de ex. `http://localhost:1234` (unde rulează HTTP + upgrade WS).
+- `COLLAB_ROOM_RESTORE_SECRET` — string shared; collab expune `POST /room/restore` doar dacă este setat.
+
 ### Runner Docker (Phase 1)
 
 - În editor, panoul **Run Pipeline** salvează snapshot-ul, pornește `POST /jobs`, apoi afișează în timp real stările **scanning / blocked / building / running / completed / failed** și logurile live prin `GET /jobs/:id/stream`.
@@ -163,6 +176,15 @@ După `pnpm dev`:
 4. `docker compose -f infra/docker-compose.yml ps` → `postgres` healthy.
 
 Pentru Prisma: `pnpm db:studio` și verifică conexiunea la `DATABASE_URL` din `.env`.
+
+Pentru **replay / checkpoint-uri** (după `pnpm db:migrate` sau `pnpm db:push` cu schema actuală):
+
+1. Pornește API, collab și web; setează opțional `COLLAB_HTTP_URL` și același `COLLAB_ROOM_RESTORE_SECRET` în `.env` (rădăcină) pentru restaurare completă a room-ului Yjs.
+2. Deschide un workspace, editează câteva secunde — așteaptă autosave (~1,2s debounce + interval minim checkpoint autosave pe server).
+3. Pornește **Run Pipeline** o dată — ar trebui să apară un checkpoint „Înainte de rulare”.
+4. Generează și **acceptă** o sugestie AI — ar trebui să apară „După accept AI”.
+5. În panoul **Istoric & replay**, mișcă slider-ul: previzualizarea trebuie să fie doar citire (fără a modifica editorul live).
+6. Alege un checkpoint vechi și **Restaurează** — confirmă dialogul; pagina se reîncarcă și conținutul trebuie să corespundă acelui punct (verifică și `GET /workspaces/:id/snapshot` dacă vrei).
 
 Pentru auth:
 

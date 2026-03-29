@@ -28,6 +28,8 @@ export function useWorkspaceRun(opts: {
   workspaceId: string;
   template: RunTemplateDto;
   persistSnapshot: () => Promise<void>;
+  /** Apelat după persistSnapshot reușit, înainte de createRunJob (ex. refresh istoric). */
+  onAfterSnapshotPersist?: () => void;
 }) {
   const [job, setJob] = useState<RunJobPublicDto | null>(null);
   const [liveLogs, setLiveLogs] = useState<RunLogEntryDto[]>([]);
@@ -115,6 +117,7 @@ export function useWorkspaceRun(opts: {
 
     try {
       await opts.persistSnapshot();
+      opts.onAfterSnapshotPersist?.();
       const { job: created } = await createRunJob({
         workspaceId: opts.workspaceId,
         template: opts.template,

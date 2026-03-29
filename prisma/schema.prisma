@@ -62,9 +62,30 @@ model Workspace {
   members WorkspaceMember[]
   runJobs RunJob[]
   aiSuggestions AiSuggestion[]
+  snapshotCheckpoints WorkspaceSnapshotCheckpoint[]
 
   @@index([ownerId])
   @@map("workspaces")
+}
+
+/// Puncte în timp pentru replay (autosave, înainte de run, după accept AI).
+enum SnapshotCheckpointKind {
+  AUTOSAVE
+  PRE_RUN
+  AI_ACCEPTED
+}
+
+model WorkspaceSnapshotCheckpoint {
+  id          String                 @id @default(cuid())
+  workspaceId String                 @map("workspace_id")
+  kind        SnapshotCheckpointKind @map("kind")
+  snapshot    Json                   @map("snapshot")
+  createdAt   DateTime               @default(now()) @map("created_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@map("workspace_snapshot_checkpoints")
 }
 
 enum AiSuggestionStatus {

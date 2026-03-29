@@ -13,6 +13,7 @@ import { createHealthPayload } from "@itecify/shared";
 import { hasValidSession } from "./auth.js";
 import { attachAiPresenceSocket } from "./aiPresenceHub.js";
 import { attachCursorSocket } from "./cursorHub.js";
+import { restoreYjsRoomFromUpdate } from "./roomRestore.js";
 
 console.log("[collab] Starting…");
 const require = createRequire(import.meta.url);
@@ -53,8 +54,56 @@ function rejectUpgrade(
   socket.destroy();
 }
 
+const roomRestoreSecret = process.env.COLLAB_ROOM_RESTORE_SECRET?.trim();
+
 const server = http.createServer((req, res) => {
   const path = req.url?.split("?")[0] ?? "";
+
+  if (
+    req.method === "POST" &&
+    (path === "/room/restore" || path === "/room/restore/")
+  ) {
+    if (!roomRestoreSecret) {
+      res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Room restore not configured (COLLAB_ROOM_RESTORE_SECRET).");
+      return;
+    }
+    const hdr = req.headers["x-room-restore-secret"];
+    const token = Array.isArray(hdr) ? hdr[0] : hdr;
+    if (token !== roomRestoreSecret) {
+      res.writeHead(401, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Unauthorized.");
+      return;
+    }
+    const chunks: Buffer[] = [];
+    req.on("data", (c) => {
+      chunks.push(c as Buffer);
+    });
+    req.on("end", () => {
+      try {
+        const raw = Buffer.concat(chunks).toString("utf8");
+        const body = JSON.parse(raw) as {
+          workspaceId?: string;
+          update?: number[];
+        };
+        const wid = body.workspaceId?.trim();
+        if (!wid || !Array.isArray(body.update)) {
+          res.writeHead(400, { "Content-Type": "text/plain; charset=utf-8" });
+          res.end("Expected { workspaceId, update: number[] }.");
+          return;
+        }
+        restoreYjsRoomFromUpdate(wid, new Uint8Array(body.update));
+        res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+        res.end(JSON.stringify({ ok: true }));
+      } catch (e) {
+        console.error("[collab] /room/restore failed:", e);
+        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Restore failed.");
+      }
+    });
+    return;
+  }
+
   if (path === "/health" || path === "/health/") {
     res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
     res.end(JSON.stringify(createHealthPayload("collab")));
