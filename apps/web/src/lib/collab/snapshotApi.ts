@@ -5,6 +5,12 @@ function apiBase(): string {
   return resolveApiBaseUrl();
 }
 
+function snapshotUrl(workspaceId: string): string {
+  const base = apiBase().replace(/\/$/, "");
+  const path = `/workspaces/${encodeURIComponent(workspaceId)}/snapshot`;
+  return base ? `${base}${path}` : path;
+}
+
 /**
  * Încarcă ultimul snapshot persistat de API (dacă există).
  * 404 = nimic stocat — clientul face bootstrap local.
@@ -12,9 +18,7 @@ function apiBase(): string {
 export async function fetchWorkspaceSnapshotUpdate(
   workspaceId: string,
 ): Promise<Uint8Array | null> {
-  const base = apiBase();
-  if (!base) return null;
-  const url = `${base}/workspaces/${encodeURIComponent(workspaceId)}/snapshot`;
+  const url = snapshotUrl(workspaceId);
   try {
     const res = await fetch(url, {
       credentials: "include",
@@ -33,9 +37,7 @@ export async function persistWorkspaceSnapshot(
   workspaceId: string,
   update: Uint8Array,
 ): Promise<void> {
-  const base = apiBase();
-  if (!base) return;
-  const url = `${base}/workspaces/${encodeURIComponent(workspaceId)}/snapshot`;
+  const url = snapshotUrl(workspaceId);
   try {
     const res = await fetch(url, {
       method: "PUT",
@@ -62,11 +64,7 @@ export async function persistWorkspaceSnapshotBlocking(
   workspaceId: string,
   update: Uint8Array,
 ): Promise<void> {
-  const base = apiBase();
-  if (!base) {
-    throw new Error("VITE_API_URL / API indisponibil.");
-  }
-  const url = `${base}/workspaces/${encodeURIComponent(workspaceId)}/snapshot`;
+  const url = snapshotUrl(workspaceId);
   const res = await fetch(url, {
     method: "PUT",
     credentials: "include",

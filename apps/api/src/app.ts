@@ -9,6 +9,7 @@ import { HttpError, toErrorDto, toFieldErrors } from "./modules/auth/errors.js";
 import { registerAuthRoutes } from "./modules/auth/routes.js";
 import { registerAiRoutes } from "./modules/ai/ai.routes.js";
 import { registerJobRoutes } from "./modules/jobs/job.routes.js";
+import { registerTerminalRoutes } from "./modules/terminal/terminal.routes.js";
 import { registerWorkspaceRoutes } from "./modules/workspaces/routes.js";
 import { registerAuthPlugin } from "./plugins/auth.js";
 import { registerPrismaPlugin } from "./plugins/prisma.js";
@@ -52,7 +53,12 @@ export async function buildApp() {
       } else {
         request.log.error(error);
       }
-      return reply.code(500).send(toErrorDto("Internal server error."));
+      const isProd = process.env.NODE_ENV === "production";
+      const fallback =
+        !isProd && typeof error.message === "string" && error.message.length > 0
+          ? error.message
+          : "Internal server error.";
+      return reply.code(500).send(toErrorDto(fallback));
     },
   );
 
@@ -60,6 +66,7 @@ export async function buildApp() {
   await app.register(registerAuthRoutes, { prefix: "/auth" });
   await app.register(registerWorkspaceRoutes);
   await app.register(registerJobRoutes);
+  await app.register(registerTerminalRoutes);
   await app.register(registerAiRoutes);
 
   return app;
