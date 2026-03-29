@@ -6,6 +6,10 @@ import type {
   RunStageStatusDto,
   RunTemplateDto,
 } from "@itecify/shared/runner";
+import {
+  getDefaultRunEntryPath as defaultRunEntryPathForTemplate,
+  getRunEntryExtensions as runEntryExtensionsForTemplate,
+} from "@itecify/shared/runner";
 import { InlineBanner } from "../../components/ui/inline-banner.js";
 import type { RunStreamState } from "./useWorkspaceRun.js";
 
@@ -302,9 +306,31 @@ export function RunPanel(props: {
   canStart: boolean;
   streamState: RunStreamState;
   template: RunTemplateDto;
+  entryPath: string | null;
+  entryOptions: string[];
+  activePath: string | null;
+  onEntryPathChange: (path: string) => void;
   onRun: () => Promise<void>;
 }): ReactNode {
   const job = props.job;
+  const hasEntryOptions = props.entryOptions.length > 0;
+  const canUseActivePath =
+    props.activePath != null && props.entryOptions.includes(props.activePath);
+  const canStartRun =
+    props.canStart && hasEntryOptions && props.entryPath != null;
+  const allowedEntryExtensions = runEntryExtensionsForTemplate(
+    props.template,
+  ).join(", ");
+  const defaultEntryPath = defaultRunEntryPathForTemplate(props.template);
+  const runButtonLabel = props.isStarting
+    ? "Saving snapshot…"
+    : !hasEntryOptions
+      ? "No runnable file"
+      : !props.canStart
+        ? "Run in progress"
+        : props.entryPath
+          ? `Scan + Build + Run (${props.template})`
+          : "Select file to run";
   const stages = job?.stages ?? {
     scanning: defaultStage(),
     building: defaultStage(),
@@ -400,10 +426,101 @@ export function RunPanel(props: {
           style={{
             display: "flex",
             alignItems: "center",
+            justifyContent: "flex-end",
             gap: 10,
             flexWrap: "wrap",
           }}
         >
+          <div
+            style={{
+              display: "grid",
+              gap: 6,
+              minWidth: 280,
+              flex: "1 1 320px",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 12,
+                color: "#94a3b8",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+              }}
+            >
+              Execution File
+            </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                flexWrap: "wrap",
+              }}
+            >
+              <select
+                value={props.entryPath ?? ""}
+                disabled={!hasEntryOptions || props.isStarting}
+                onChange={(event) => {
+                  props.onEntryPathChange(event.currentTarget.value);
+                }}
+                style={{
+                  flex: "1 1 240px",
+                  minWidth: 220,
+                  borderRadius: 10,
+                  border: "1px solid #334155",
+                  background: "rgba(15,23,42,0.84)",
+                  color: hasEntryOptions ? "#e2e8f0" : "#64748b",
+                  padding: "10px 12px",
+                }}
+              >
+                {hasEntryOptions ? (
+                  props.entryOptions.map((entryPath) => (
+                    <option key={entryPath} value={entryPath}>
+                      {entryPath}
+                    </option>
+                  ))
+                ) : (
+                  <option value="">No compatible files found</option>
+                )}
+              </select>
+              <button
+                type="button"
+                disabled={
+                  !canUseActivePath || props.activePath === props.entryPath
+                }
+                onClick={() => {
+                  if (props.activePath) {
+                    props.onEntryPathChange(props.activePath);
+                  }
+                }}
+                style={{
+                  border: "1px solid #334155",
+                  background:
+                    canUseActivePath && props.activePath !== props.entryPath
+                      ? "rgba(15,23,42,0.84)"
+                      : "rgba(15,23,42,0.4)",
+                  color:
+                    canUseActivePath && props.activePath !== props.entryPath
+                      ? "#cbd5e1"
+                      : "#64748b",
+                  borderRadius: 10,
+                  padding: "10px 12px",
+                  cursor:
+                    canUseActivePath && props.activePath !== props.entryPath
+                      ? "pointer"
+                      : "not-allowed",
+                  fontWeight: 600,
+                }}
+              >
+                Use Current File
+              </button>
+            </div>
+            <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5 }}>
+              {hasEntryOptions
+                ? `Allowed entries: ${allowedEntryExtensions}. Default template entry: ${defaultEntryPath}.`
+                : `No ${allowedEntryExtensions} files are available in this workspace yet.`}
+            </div>
+          </div>
           <div
             style={{
               padding: "6px 10px",
@@ -420,25 +537,21 @@ export function RunPanel(props: {
           </div>
           <button
             type="button"
-            disabled={!props.canStart}
+            disabled={!canStartRun}
             onClick={() => {
               void props.onRun();
             }}
             style={{
               border: "1px solid #0284c7",
-              background: props.canStart ? "#082f49" : "#102033",
-              color: props.canStart ? "#dbeafe" : "#64748b",
+              background: canStartRun ? "#082f49" : "#102033",
+              color: canStartRun ? "#dbeafe" : "#64748b",
               borderRadius: 10,
               padding: "10px 14px",
-              cursor: props.canStart ? "pointer" : "not-allowed",
+              cursor: canStartRun ? "pointer" : "not-allowed",
               fontWeight: 700,
             }}
           >
-            {props.isStarting
-              ? "Saving snapshot…"
-              : props.canStart
-                ? `Scan + Build + Run (${props.template})`
-                : "Run in progress"}
+            {runButtonLabel}
           </button>
         </div>
       </div>
@@ -566,6 +679,9 @@ export function RunPanel(props: {
             </span>
             <span style={{ color: "#94a3b8" }}>
               Exit {job?.exitCode ?? "n/a"}
+            </span>
+            <span style={{ color: "#94a3b8" }}>
+              Entry {props.entryPath ?? "n/a"}
             </span>
           </div>
         </div>

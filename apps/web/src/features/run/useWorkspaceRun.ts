@@ -1,10 +1,12 @@
 import { startTransition, useEffect, useRef, useState } from "react";
 import type {
+  CreateRunJobBodyDto,
   RunJobPublicDto,
   RunJobStatusDto,
   RunLogEntryDto,
   RunTemplateDto,
 } from "@itecify/shared/runner";
+import { normalizeRunEntryPath } from "@itecify/shared/runner";
 import { createRunJob, subscribeRunJob } from "../../lib/api/jobApi.js";
 
 const TERMINAL_STATUSES = new Set<RunJobStatusDto>([
@@ -28,6 +30,7 @@ export function useWorkspaceRun(opts: {
   workspaceId: string;
   template: RunTemplateDto;
   persistSnapshot: () => Promise<void>;
+  getEntryPath?: () => string | null;
   /** Apelat după persistSnapshot reușit, înainte de createRunJob (ex. refresh istoric). */
   onAfterSnapshotPersist?: () => void;
 }) {
@@ -116,6 +119,26 @@ export function useWorkspaceRun(opts: {
       };
     }
 
+    const rawEntryPath = opts.getEntryPath?.();
+    if (
+      opts.getEntryPath &&
+      (!rawEntryPath || rawEntryPath.trim().length === 0)
+    ) {
+      return {
+        ok: false,
+        message:
+          "Selectează un fișier compatibil înainte să pornești pipeline-ul.",
+      };
+    }
+
+    const createBody: CreateRunJobBodyDto = {
+      workspaceId: opts.workspaceId,
+      template: opts.template,
+      ...(rawEntryPath
+        ? { entryPath: normalizeRunEntryPath(rawEntryPath) }
+        : {}),
+    };
+
     setIsStarting(true);
     setError(null);
     setLiveLogs([]);
@@ -126,10 +149,7 @@ export function useWorkspaceRun(opts: {
     try {
       await opts.persistSnapshot();
       opts.onAfterSnapshotPersist?.();
-      const { job: created } = await createRunJob({
-        workspaceId: opts.workspaceId,
-        template: opts.template,
-      });
+      const { job: created } = await createRunJob(createBody);
       setJob(created);
       attachStream(created.id);
       return { ok: true };

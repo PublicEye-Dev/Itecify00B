@@ -3,6 +3,9 @@ import { z } from "zod";
 export const runTemplateSchema = z.enum(["javascript", "python", "java", "c"]);
 export type RunTemplateDto = z.infer<typeof runTemplateSchema>;
 
+export const runEntryPathSchema = z.string().trim().min(1).max(512);
+export type RunEntryPathDto = z.infer<typeof runEntryPathSchema>;
+
 export const runFindingSeveritySchema = z.enum([
   "LOW",
   "MEDIUM",
@@ -130,6 +133,7 @@ export type RunLogEntryDto = z.infer<typeof runLogEntrySchema>;
 export const createRunJobBodySchema = z.object({
   workspaceId: z.string().min(1).max(256),
   template: runTemplateSchema,
+  entryPath: runEntryPathSchema.optional(),
 });
 export type CreateRunJobBodyDto = z.infer<typeof createRunJobBodySchema>;
 

@@ -11,7 +11,12 @@ import {
 } from "react";
 import type { AiSuggestionPersisted, TargetRange } from "@itecify/shared/ai";
 import type { UserDto } from "@itecify/shared/auth";
-import type { RunJobStatusDto } from "@itecify/shared/runner";
+import {
+  filterCompatibleRunEntryPaths,
+  getDefaultRunEntryPath,
+  isCompatibleRunEntryPath,
+  type RunJobStatusDto,
+} from "@itecify/shared/runner";
 import type { WorkspaceTemplateDto } from "@itecify/shared/workspaces";
 import { Link } from "react-router-dom";
 import * as Y from "yjs";
@@ -159,6 +164,7 @@ export function WorkspaceCollabLayout({
     "run",
   );
   const [activePath, setActivePath] = useState<string | null>(null);
+  const [runEntryPath, setRunEntryPath] = useState<string | null>(null);
   const [pendingSuggestions, setPendingSuggestions] = useState<
     AiSuggestionPersisted[]
   >([]);
@@ -419,6 +425,37 @@ export function WorkspaceCollabLayout({
     }
   }, [paths, activePath, files]);
 
+  const runnableEntryPaths = useMemo(
+    () => filterCompatibleRunEntryPaths(workspaceTemplate, paths),
+    [workspaceTemplate, paths],
+  );
+
+  const activeRunnablePath = useMemo(() => {
+    if (
+      !activePath ||
+      !isCompatibleRunEntryPath(workspaceTemplate, activePath)
+    ) {
+      return null;
+    }
+    return activePath;
+  }, [activePath, workspaceTemplate]);
+
+  useEffect(() => {
+    const defaultEntryPath = getDefaultRunEntryPath(workspaceTemplate);
+    const fallbackEntryPath = runnableEntryPaths.includes(defaultEntryPath)
+      ? defaultEntryPath
+      : activeRunnablePath && runnableEntryPaths.includes(activeRunnablePath)
+        ? activeRunnablePath
+        : (runnableEntryPaths[0] ?? null);
+
+    setRunEntryPath((current) => {
+      if (current && runnableEntryPaths.includes(current)) {
+        return current;
+      }
+      return fallbackEntryPath;
+    });
+  }, [workspaceTemplate, runnableEntryPaths, activeRunnablePath]);
+
   const handleReveal = useCallback((filePath: string, range: TargetRange) => {
     setActivePath(filePath);
     revealKeyRef.current += 1;
@@ -564,6 +601,7 @@ export function WorkspaceCollabLayout({
   const runner = useWorkspaceRun({
     workspaceId,
     template: workspaceTemplate,
+    getEntryPath: () => runEntryPath,
     persistSnapshot: async () => {
       await persistWorkspaceSnapshotBlocking(
         workspaceId,
@@ -1286,6 +1324,10 @@ export function WorkspaceCollabLayout({
               canStart={runner.canStart}
               streamState={runner.streamState}
               template={workspaceTemplate}
+              entryPath={runEntryPath}
+              entryOptions={runnableEntryPaths}
+              activePath={activePath}
+              onEntryPathChange={setRunEntryPath}
               onRun={async () => {
                 await runner.startRun();
               }}

@@ -23,6 +23,7 @@ export async function registerJobRoutes(app: FastifyInstance): Promise<void> {
         request.auth!.user.id,
         body.workspaceId,
         body.template,
+        body.entryPath,
       );
       return reply.code(202).send({ job });
     },

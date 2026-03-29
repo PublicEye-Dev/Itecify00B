@@ -1,3 +1,4 @@
+import path from "node:path";
 import type { RunTemplateDto } from "@itecify/shared/runner";
 
 export type RuntimeRecipe = {
@@ -62,4 +63,80 @@ gcc -O2 -std=c11 -Wall -Wextra -o .itecify-build/a.out main.c
 
 export function getRecipe(template: RunTemplateDto): RuntimeRecipe {
   return RUNTIME_RECIPES[template];
+}
+
+function shellQuotePosix(value: string): string {
+  return `'${value.replace(/'/g, `'"'"'`)}'`;
+}
+
+function resolveJavaMainClass(
+  entryPath: string,
+  entrySourceText: string | null | undefined,
+): string {
+  const fileBaseName = path.posix.basename(entryPath, ".java");
+  const pkgMatch = entrySourceText?.match(
+    /^\s*package\s+([A-Za-z_][\w]*(?:\.[A-Za-z_][\w]*)*)\s*;/m,
+  );
+  if (!pkgMatch?.[1]) {
+    return fileBaseName;
+  }
+  return `${pkgMatch[1]}.${fileBaseName}`;
+}
+
+export function resolveRuntimeScripts(opts: {
+  template: RunTemplateDto;
+  entryPath: string;
+  entrySourceText?: string | null;
+}): {
+  buildScript: string | null;
+  runScript: string;
+} {
+  const entryPath = opts.entryPath.split("\\").join("/");
+  const quotedEntryPath = shellQuotePosix(entryPath);
+
+  switch (opts.template) {
+    case "javascript":
+      return {
+        buildScript: null,
+        runScript: `set -eu
+node ${quotedEntryPath}
+`,
+      };
+
+    case "python":
+      return {
+        buildScript: null,
+        runScript: `set -eu
+python ${quotedEntryPath}
+`,
+      };
+
+    case "java": {
+      const mainClass = shellQuotePosix(
+        resolveJavaMainClass(entryPath, opts.entrySourceText),
+      );
+      return {
+        buildScript: `set -eu
+rm -rf .itecify-build
+mkdir -p .itecify-build
+javac -encoding UTF-8 -d .itecify-build ${quotedEntryPath}
+`,
+        runScript: `set -eu
+java -cp .itecify-build ${mainClass}
+`,
+      };
+    }
+
+    case "c":
+      return {
+        buildScript: `set -eu
+rm -rf .itecify-build
+mkdir -p .itecify-build
+gcc -O2 -std=c11 -Wall -Wextra -o .itecify-build/a.out ${quotedEntryPath}
+`,
+        runScript: `set -eu
+./.itecify-build/a.out
+`,
+      };
+  }
 }

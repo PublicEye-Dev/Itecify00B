@@ -6,12 +6,15 @@ import process from "node:process";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { RunJobStatus, RunTemplate, type RunJob } from "@prisma/client";
 import {
+  isCompatibleRunEntryPath,
+  normalizeRunEntryPath,
   runLogStatsSchema,
   runPolicySchema,
   type RunLogStatsDto,
   type RunPolicyDto,
   type RunTemplateDto,
 } from "@itecify/shared/runner";
+import { HttpError } from "../auth/errors.js";
 import { getSnapshotBytesForWorkspace } from "../snapshots/snapshot.service.js";
 import { runInDocker } from "../runner/dockerRunner.js";
 import {
@@ -20,7 +23,11 @@ import {
   emitJobSnapshot,
 } from "../runner/jobLogBus.js";
 import { materializeYjsSnapshotToDir } from "../runner/materializeWorkspace.js";
-import { getRecipe } from "../runtime-templates/recipes.js";
+import { isSafeRelativeWorkspacePath } from "../runner/safePath.js";
+import {
+  getRecipe,
+  resolveRuntimeScripts,
+} from "../runtime-templates/recipes.js";
 import { resolveRunPolicy } from "../security/policy.js";
 import { runSemgrepScan } from "../security/semgrep.js";
 import { assertWorkspaceMember } from "../workspaces/workspace.service.js";
@@ -48,6 +55,32 @@ const templateToPrisma: Record<RunTemplateDto, RunTemplate> = {
 function workRootFor(jobId: string): string {
   const base = process.env.RUNNER_WORK_ROOT ?? os.tmpdir();
   return path.join(base, "itecify-runs", jobId);
+}
+
+function resolveRequestedEntryPath(
+  template: RunTemplateDto,
+  entryPath: string | null | undefined,
+  fallbackEntryPath: string,
+): string {
+  const normalized = entryPath
+    ? normalizeRunEntryPath(entryPath)
+    : fallbackEntryPath;
+
+  if (!normalized || !isSafeRelativeWorkspacePath(normalized)) {
+    throw new HttpError(
+      400,
+      "Calea fișierului selectat pentru rulare este invalidă.",
+    );
+  }
+
+  if (!isCompatibleRunEntryPath(template, normalized)) {
+    throw new HttpError(
+      400,
+      `Fișierul selectat nu este compatibil cu template-ul ${template}.`,
+    );
+  }
+
+  return normalized;
 }
 
 function toJsonValue(value: unknown): Prisma.InputJsonValue {
@@ -208,6 +241,7 @@ async function updateJob(
 async function runOrchestrator(
   prisma: PrismaClient,
   jobId: string,
+  selectedEntryPath: string,
 ): Promise<void> {
   let workDir: string | null = null;
   let policy: RunPolicyDto | null = null;
@@ -285,15 +319,40 @@ async function runOrchestrator(
     }
 
     const recipe = getRecipe(job.template as RunTemplateDto);
-    const entryPath = path.join(workDir, recipe.requiredEntry);
-    if (!fssync.existsSync(entryPath)) {
+    const selectedEntryFullPath = path.join(
+      workDir,
+      selectedEntryPath.split("/").join(path.sep),
+    );
+    const resolvedEntryFullPath = path.resolve(selectedEntryFullPath);
+    const resolvedWorkDir = path.resolve(workDir);
+    if (
+      !resolvedEntryFullPath.startsWith(resolvedWorkDir + path.sep) &&
+      resolvedEntryFullPath !== resolvedWorkDir
+    ) {
       await fail(
         RunJobStatus.FAILED,
-        "MISSING_ENTRY",
-        `Lipsește fișierul obligatoriu pentru șablon: ${recipe.requiredEntry}`,
+        "INVALID_ENTRY_PATH",
+        "Fișierul selectat pentru execuție nu poate fi accesat în sandbox.",
       );
       return;
     }
+
+    if (!fssync.existsSync(resolvedEntryFullPath)) {
+      await fail(
+        RunJobStatus.FAILED,
+        "MISSING_ENTRY",
+        `Fișierul selectat pentru execuție nu există în snapshot: ${selectedEntryPath}`,
+      );
+      return;
+    }
+
+    const entrySourceText = await fs.readFile(resolvedEntryFullPath, "utf8");
+    const runtimeScripts = resolveRuntimeScripts({
+      template: job.template as RunTemplateDto,
+      entryPath: selectedEntryPath,
+      entrySourceText,
+    });
+    appendSystemLog(`[entry] Selected execution file: ${selectedEntryPath}\n`);
 
     const label = `itecify.job.id=${jobId}`;
     await updateJob(prisma, jobId, {
@@ -358,7 +417,7 @@ async function runOrchestrator(
       errorMessage: null,
     });
 
-    if (recipe.buildScript) {
+    if (runtimeScripts.buildScript) {
       appendSystemLog(
         `[build] Starting build stage with ${policy.build.cpus} CPU / ${policy.build.memory} / ${policy.build.timeoutMs} ms.\n`,
       );
@@ -367,7 +426,7 @@ async function runOrchestrator(
         const buildResult = await runInDocker({
           workDirHost: workDir,
           image: recipe.dockerImage,
-          command: ["sh", "-c", recipe.buildScript],
+          command: ["sh", "-c", runtimeScripts.buildScript],
           label: `${label}.build`,
           containerName: `itecify-build-${jobId}`,
           timeoutMs: policy.build.timeoutMs,
@@ -423,7 +482,7 @@ async function runOrchestrator(
       const result = await runInDocker({
         workDirHost: workDir,
         image: recipe.dockerImage,
-        command: ["sh", "-c", recipe.runScript],
+        command: ["sh", "-c", runtimeScripts.runScript],
         label: `${label}.run`,
         containerName: `itecify-run-${jobId}`,
         timeoutMs: policy.run.timeoutMs,
@@ -490,8 +549,16 @@ export async function createJob(
   userId: string,
   workspaceId: string,
   template: RunTemplateDto,
+  entryPath?: string | null,
 ) {
   await assertWorkspaceMember(prisma, userId, workspaceId);
+
+  const recipe = getRecipe(template);
+  const resolvedEntryPath = resolveRequestedEntryPath(
+    template,
+    entryPath,
+    recipe.requiredEntry,
+  );
 
   const policy = resolveRunPolicy(template);
   const logStats = runLogStatsSchema.parse({
@@ -511,7 +578,7 @@ export async function createJob(
     },
   });
 
-  void runOrchestrator(prisma, job.id);
+  void runOrchestrator(prisma, job.id, resolvedEntryPath);
 
   return toRunJobPublicDto(job);
 }
