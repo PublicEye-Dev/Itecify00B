@@ -33,6 +33,7 @@ import { CollabMonacoEditor } from "../editor/CollabMonacoEditor.js";
 import { ReplayPanel } from "../replay/ReplayPanel.js";
 import { RunPanel } from "../run/RunPanel.js";
 import { useWorkspaceRun } from "../run/useWorkspaceRun.js";
+import { WorkspaceTerminalPanel } from "../terminal/WorkspaceTerminalPanel.js";
 import { FileTree } from "./FileTree.js";
 import {
   createUntitledFile,
@@ -52,7 +53,7 @@ const TOP_SECTION_MIN_HEIGHT = 220;
 const HANDLE_SIZE = 10;
 const KEYBOARD_RESIZE_STEP = 24;
 
-type BottomWorkspaceTab = "run" | "history";
+type BottomWorkspaceTab = "run" | "history" | "terminal";
 
 type ResizeHandleKind = "left" | "right" | "bottom";
 
@@ -735,7 +736,7 @@ export function WorkspaceCollabLayout({
         </div>
 
         <ResizeHandle
-          ariaLabel="Redimensionează panoul inferior (Run / Istoric)"
+          ariaLabel="Redimensionează panoul inferior (Run / Istoric / Terminal)"
           isDragging={draggingHandle === "bottom"}
           onDoubleClick={() => {
             resetPanelSize("bottom");
@@ -848,6 +849,36 @@ export function WorkspaceCollabLayout({
                 >
                   Istoric & replay
                 </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={bottomTab === "terminal"}
+                  id={`${workspaceId}-tab-terminal`}
+                  aria-controls={`${workspaceId}-panel-terminal`}
+                  onClick={() => {
+                    setBottomTab("terminal");
+                  }}
+                  style={{
+                    padding: "8px 14px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    border: "none",
+                    borderRadius: "8px 8px 0 0",
+                    cursor: "pointer",
+                    background:
+                      bottomTab === "terminal"
+                        ? "rgba(56, 189, 248, 0.12)"
+                        : "transparent",
+                    color: bottomTab === "terminal" ? "#e5eef6" : "#94a8c4",
+                    borderBottom:
+                      bottomTab === "terminal"
+                        ? "2px solid #38bdf8"
+                        : "2px solid transparent",
+                    marginBottom: -1,
+                  }}
+                >
+                  Terminal
+                </button>
               </div>
               <button
                 type="button"
@@ -909,7 +940,9 @@ export function WorkspaceCollabLayout({
               canStart={runner.canStart}
               streamState={runner.streamState}
               template={workspaceTemplate}
-              onRun={runner.startRun}
+              onRun={async () => {
+                await runner.startRun();
+              }}
             />
           </div>
 
@@ -929,6 +962,43 @@ export function WorkspaceCollabLayout({
             <ReplayPanel
               workspaceId={workspaceId}
               refreshKey={historyRefreshKey}
+            />
+          </div>
+
+          <div
+            role="tabpanel"
+            id={`${workspaceId}-panel-terminal`}
+            aria-labelledby={`${workspaceId}-tab-terminal`}
+            hidden={bottomTab !== "terminal"}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: bottomTab === "terminal" ? "flex" : "none",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+          >
+            <WorkspaceTerminalPanel
+              workspaceId={workspaceId}
+              currentUserId={currentUser.id}
+              currentUserName={currentUser.name}
+              wsEnabled={bottomTab === "terminal"}
+              onBeforeEnsureSandbox={async () => {
+                await persistWorkspaceSnapshotBlocking(
+                  workspaceId,
+                  Y.encodeStateAsUpdate(ydoc),
+                );
+              }}
+              operatorRunner={{
+                startRun: runner.startRun,
+                job: runner.job,
+                liveLogs: runner.liveLogs,
+                streamState: runner.streamState,
+                isStarting: runner.isStarting,
+                canStart: runner.canStart,
+                runError: runner.error,
+                templateLabel: workspaceTemplate,
+              }}
             />
           </div>
         </div>
@@ -1004,7 +1074,7 @@ function useStoredBottomTab(
       return fallback;
     }
     const raw = window.localStorage.getItem(key);
-    if (raw === "run" || raw === "history") {
+    if (raw === "run" || raw === "history" || raw === "terminal") {
       return raw;
     }
     return fallback;
