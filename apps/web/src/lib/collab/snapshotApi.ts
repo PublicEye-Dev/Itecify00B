@@ -32,10 +32,18 @@ function apiBase(): string {
   return resolveApiBaseUrl();
 }
 
-function snapshotUrl(workspaceId: string): string {
+/**
+ * În dev fără `VITE_API_URL`, `apiBase()` e gol — folosim path relativ `/workspaces/...`
+ * (proxy Vite → API). Nu folosi `if (!base) return` înainte de fetch.
+ */
+function apiWorkspaceUrl(path: string): string {
   const base = apiBase().replace(/\/$/, "");
-  const path = `/workspaces/${encodeURIComponent(workspaceId)}/snapshot`;
-  return base ? `${base}${path}` : path;
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return base ? `${base}${p}` : p;
+}
+
+function snapshotUrl(workspaceId: string): string {
+  return apiWorkspaceUrl(`/workspaces/${encodeURIComponent(workspaceId)}/snapshot`);
 }
 
 /**
@@ -68,9 +76,7 @@ export async function persistWorkspaceSnapshot(
   if (isAutosavePersistSuppressed()) {
     return;
   }
-  const base = apiBase();
-  if (!base) return;
-  const url = `${base}/workspaces/${encodeURIComponent(workspaceId)}/snapshot`;
+  const url = snapshotUrl(workspaceId);
   const payload = {
     version: 1 as const,
     update: Array.from(update),
@@ -92,10 +98,8 @@ export async function persistWorkspaceSnapshot(
       );
     }
     if (res.ok) {
-      /* Cursă: flush-ul debounced a pornit PUT înainte de „Salvează checkpoint” / suppress.
-       * La întoarcerea răspunsului, trebuie să respectăm suprimarea curentă, altfel apare
-       * un AUTOSAVE duplicat lângă MANUAL_SAVE (același snapshot). */
-      clearExpiredAutosaveSuppress();
+      /* Cursă: PUT autosave pornit înainte de „Salvează checkpoint”; la răspuns, nu apela
+       * clearExpired înainte de test — poate altera starea. Doar verificăm suppress activ. */
       if (isAutosavePersistSuppressed()) {
         return;
       }
@@ -122,18 +126,15 @@ export async function saveManualCheckpointToHistory(
   workspaceId: string,
   update: Uint8Array,
 ): Promise<{ checkpointId: string }> {
-  clearExpiredAutosaveSuppress();
-  suppressAutosavePersistForMs(2500);
+  /* Primul pas sincron: blochează orice AUTOSAVE care ar înregistra checkpoint după un PUT întârziat.
+   * Nu apela clearExpired aici — ar putea scurta o fereastră de suppress de la restore. */
+  suppressAutosavePersistForMs(12_000);
 
-  const base = apiBase();
-  if (!base) {
-    throw new Error("VITE_API_URL / API indisponibil.");
-  }
   const payload = {
     version: 1 as const,
     update: Array.from(update),
   };
-  const putUrl = `${base}/workspaces/${encodeURIComponent(workspaceId)}/snapshot`;
+  const putUrl = snapshotUrl(workspaceId);
   const putRes = await fetch(putUrl, {
     method: "PUT",
     credentials: "include",
@@ -150,7 +151,9 @@ export async function saveManualCheckpointToHistory(
     );
   }
 
-  const postUrl = `${base}/workspaces/${encodeURIComponent(workspaceId)}/snapshot/checkpoints`;
+  const postUrl = apiWorkspaceUrl(
+    `/workspaces/${encodeURIComponent(workspaceId)}/snapshot/checkpoints`,
+  );
   const postRes = await fetch(postUrl, {
     method: "POST",
     credentials: "include",
@@ -213,9 +216,12 @@ async function recordSnapshotCheckpoint(
   kind: SnapshotCheckpointKindDto,
   snapshot: { version: 1; update: number[] },
 ): Promise<boolean> {
-  const base = apiBase();
-  if (!base) return false;
-  const url = `${base}/workspaces/${encodeURIComponent(workspaceId)}/snapshot/checkpoints`;
+  if (kind === "AUTOSAVE" && isAutosavePersistSuppressed()) {
+    return false;
+  }
+  const url = apiWorkspaceUrl(
+    `/workspaces/${encodeURIComponent(workspaceId)}/snapshot/checkpoints`,
+  );
   try {
     const res = await fetch(url, {
       method: "POST",
@@ -255,9 +261,9 @@ export async function recordSnapshotCheckpointExplicit(
 export async function fetchSnapshotCheckpoints(
   workspaceId: string,
 ): Promise<{ id: string; kind: SnapshotCheckpointKindDto; createdAt: Date }[]> {
-  const base = apiBase();
-  if (!base) return [];
-  const url = `${base}/workspaces/${encodeURIComponent(workspaceId)}/snapshot/checkpoints`;
+  const url = apiWorkspaceUrl(
+    `/workspaces/${encodeURIComponent(workspaceId)}/snapshot/checkpoints`,
+  );
   const res = await fetch(url, { credentials: "include" });
   const payload = await readJsonFromResponse(res);
 
@@ -299,9 +305,9 @@ export async function fetchCheckpointSnapshotJson(
   workspaceId: string,
   checkpointId: string,
 ): Promise<{ version: 1; update: number[] } | null> {
-  const base = apiBase();
-  if (!base) return null;
-  const url = `${base}/workspaces/${encodeURIComponent(workspaceId)}/snapshot/checkpoints/${encodeURIComponent(checkpointId)}`;
+  const url = apiWorkspaceUrl(
+    `/workspaces/${encodeURIComponent(workspaceId)}/snapshot/checkpoints/${encodeURIComponent(checkpointId)}`,
+  );
   const res = await fetch(url, { credentials: "include" });
   if (!res.ok) return null;
   const raw: unknown = await res.json();
@@ -312,14 +318,14 @@ export async function restoreSnapshotCheckpoint(
   workspaceId: string,
   checkpointId: string,
 ): Promise<{ liveStateAligned: true }> {
-  const base = apiBase();
-  if (!base) {
-    throw new Error("API indisponibil.");
-  }
-  const url = `${base}/workspaces/${encodeURIComponent(workspaceId)}/snapshot/checkpoints/${encodeURIComponent(checkpointId)}/restore`;
+  const url = apiWorkspaceUrl(
+    `/workspaces/${encodeURIComponent(workspaceId)}/snapshot/checkpoints/${encodeURIComponent(checkpointId)}/restore`,
+  );
   const res = await fetch(url, {
     method: "POST",
     credentials: "include",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: "{}",
   });
   const payload = await readJsonFromResponse(res);
   if (!res.ok) {
@@ -332,7 +338,11 @@ export async function restoreSnapshotCheckpoint(
   }
   const parsed = restoreCheckpointResponseSchema.safeParse(payload);
   if (!parsed.success) {
-    throw new Error("Răspuns API invalid la restaurare.");
+    const hint =
+      import.meta.env.DEV && payload !== null
+        ? ` (primit: ${JSON.stringify(payload).slice(0, 160)})`
+        : "";
+    throw new Error(`Răspuns API invalid la restaurare.${hint}`);
   }
   return { liveStateAligned: parsed.data.liveStateAligned };
 }
