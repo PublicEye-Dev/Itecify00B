@@ -20,10 +20,19 @@ export class ApiClientError extends Error {
   }
 }
 
+/**
+ * În dev, fără `VITE_API_URL`, folosim URL relativ (același origin ca Vite) + `server.proxy`
+ * spre API — cookie-ul de sesiune merge și la WebSocket (altfel `ws://localhost:3001` poate
+ * rămâne fără auth sau blocat cross-origin).
+ */
 export function resolveApiBaseUrl(): string {
   const configured = import.meta.env.VITE_API_URL;
-  if (typeof configured === "string" && configured.length > 0) {
+  if (typeof configured === "string" && configured.trim().length > 0) {
     return configured.replace(/\/$/, "");
+  }
+
+  if (import.meta.env.DEV && typeof window !== "undefined") {
+    return "";
   }
 
   return `${window.location.protocol}//${window.location.hostname}:3001`;

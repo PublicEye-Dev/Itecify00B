@@ -28,6 +28,7 @@ import { useWorkspaceAiPresence } from "../../lib/collab/useWorkspaceAiPresence.
 import { CollabMonacoEditor } from "../editor/CollabMonacoEditor.js";
 import { RunPanel } from "../run/RunPanel.js";
 import { useWorkspaceRun } from "../run/useWorkspaceRun.js";
+import { WorkspaceTerminalPanel } from "../terminal/WorkspaceTerminalPanel.js";
 import { FileTree } from "./FileTree.js";
 import {
   createUntitledFile,
@@ -92,6 +93,7 @@ export function WorkspaceCollabLayout({
   const [draggingHandle, setDraggingHandle] = useState<ResizeHandleKind | null>(
     null,
   );
+  const [bottomTab, setBottomTab] = useState<"run" | "terminal">("run");
   const revealKeyRef = useRef(0);
   const dragCleanupRef = useRef<(() => void) | null>(null);
   const layoutBodyRef = useRef<HTMLDivElement | null>(null);
@@ -648,19 +650,106 @@ export function WorkspaceCollabLayout({
             minHeight: RUN_PANEL_MIN_HEIGHT,
             maxHeight: runPanelMaxHeight,
             minWidth: 0,
-            overflow: "auto",
+            overflow: "hidden",
+            display: "flex",
+            flexDirection: "column",
           }}
         >
-          <RunPanel
-            job={runner.job}
-            liveLogs={runner.liveLogs}
-            error={runner.error}
-            isStarting={runner.isStarting}
-            canStart={runner.canStart}
-            streamState={runner.streamState}
-            template={workspaceTemplate}
-            onRun={runner.startRun}
-          />
+          <div
+            style={{
+              display: "flex",
+              gap: 0,
+              borderBottom: "1px solid #2a2a2a",
+              background: "#181818",
+              flexShrink: 0,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setBottomTab("run");
+              }}
+              style={{
+                border: "none",
+                borderBottom:
+                  bottomTab === "run" ? "2px solid #38bdf8" : "2px solid transparent",
+                background: bottomTab === "run" ? "#1f2937" : "transparent",
+                color: "#e5e7eb",
+                padding: "8px 14px",
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: bottomTab === "run" ? 600 : 500,
+              }}
+            >
+              Run Pipeline
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setBottomTab("terminal");
+              }}
+              style={{
+                border: "none",
+                borderBottom:
+                  bottomTab === "terminal"
+                    ? "2px solid #38bdf8"
+                    : "2px solid transparent",
+                background: bottomTab === "terminal" ? "#1f2937" : "transparent",
+                color: "#e5e7eb",
+                padding: "8px 14px",
+                cursor: "pointer",
+                fontSize: 13,
+                fontWeight: bottomTab === "terminal" ? 600 : 500,
+              }}
+            >
+              Terminal
+            </button>
+          </div>
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              overflow: bottomTab === "terminal" ? "hidden" : "auto",
+            }}
+          >
+            {bottomTab === "run" ? (
+              <RunPanel
+                job={runner.job}
+                liveLogs={runner.liveLogs}
+                error={runner.error}
+                isStarting={runner.isStarting}
+                canStart={runner.canStart}
+                streamState={runner.streamState}
+                template={workspaceTemplate}
+                onRun={async () => {
+                  await runner.startRun();
+                }}
+              />
+            ) : (
+              <WorkspaceTerminalPanel
+                workspaceId={workspaceId}
+                currentUserId={currentUser.id}
+                currentUserName={currentUser.name}
+                wsEnabled={bottomTab === "terminal"}
+                onBeforeEnsureSandbox={async () => {
+                  await persistWorkspaceSnapshotBlocking(
+                    workspaceId,
+                    Y.encodeStateAsUpdate(ydoc),
+                  );
+                }}
+                operatorRunner={{
+                  startRun: runner.startRun,
+                  job: runner.job,
+                  liveLogs: runner.liveLogs,
+                  streamState: runner.streamState,
+                  isStarting: runner.isStarting,
+                  canStart: runner.canStart,
+                  runError: runner.error,
+                  templateLabel: workspaceTemplate,
+                }}
+              />
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -103,8 +103,16 @@ export function useWorkspaceRun(opts: {
     };
   }
 
-  async function startRun(): Promise<void> {
-    if (isStarting || isActive) return;
+  async function startRun(): Promise<
+    { ok: true } | { ok: false; message: string }
+  > {
+    if (isStarting || isActive) {
+      return {
+        ok: false,
+        message:
+          "O rulare este deja activă sau pipeline-ul se pornește. Așteaptă finalizarea sau tab-ul Run.",
+      };
+    }
 
     setIsStarting(true);
     setError(null);
@@ -121,10 +129,12 @@ export function useWorkspaceRun(opts: {
       });
       setJob(created);
       attachStream(created.id);
+      return { ok: true };
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : String(cause);
       setStreamState("idle");
       setError(message);
+      return { ok: false, message };
     } finally {
       setIsStarting(false);
     }
