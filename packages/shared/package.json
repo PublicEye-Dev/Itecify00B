@@ -32,6 +32,10 @@
       "types": "./dist/ai/index.d.ts",
       "import": "./dist/ai/index.js"
     },
+    "./replay": {
+      "types": "./dist/replay/index.d.ts",
+      "import": "./dist/replay/index.js"
+    },
     "./terminal": {
       "types": "./dist/terminal/index.d.ts",
       "import": "./dist/terminal/index.js"

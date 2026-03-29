@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import * as Y from "yjs";
 import { WebsocketProvider } from "y-websocket";
 import { bootstrapWorkspaceIfEmpty, getWorkspaceFilesMap } from "./workspaceDoc.js";
+import { isAutosavePersistSuppressed } from "./autosaveSuppress.js";
 import { fetchWorkspaceSnapshotUpdate, persistWorkspaceSnapshot } from "./snapshotApi.js";
 
 type ReadyState = {
@@ -77,6 +78,9 @@ export function WorkspaceCollabProvider({
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const flush = (): void => {
+      if (isAutosavePersistSuppressed()) {
+        return;
+      }
       void persistWorkspaceSnapshot(workspaceId, Y.encodeStateAsUpdate(ydoc));
     };
 

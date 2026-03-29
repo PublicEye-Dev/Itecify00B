@@ -16,6 +16,7 @@ import {
   listAiSuggestions,
   patchAiSuggestion,
 } from "../../lib/api/aiApi.js";
+import { recordSnapshotCheckpointExplicit } from "../../lib/collab/snapshotApi.js";
 import { ApiClientError } from "../../lib/api/client.js";
 import type { SendAiPresenceInput } from "../../lib/collab/useWorkspaceAiPresence.js";
 import { applySuggestionToYText } from "./applySuggestionToYText.js";
@@ -196,6 +197,21 @@ export function AiSuggestionsSidebar({
         s.replacementText ?? "",
       );
       await patchAiSuggestion(workspaceId, id, "accept");
+      const checkpointOk = await recordSnapshotCheckpointExplicit(
+        workspaceId,
+        "AI_ACCEPTED",
+        Y.encodeStateAsUpdate(ydoc),
+      );
+      if (!checkpointOk && import.meta.env.DEV) {
+        console.warn(
+          "[itecify:checkpoint] AI_ACCEPTED nu s-a înregistrat în istoric.",
+        );
+      }
+      window.dispatchEvent(
+        new CustomEvent("itecify-checkpoints-changed", {
+          detail: { workspaceId },
+        }),
+      );
       setConflictIds((prev) => {
         const n = new Set(prev);
         n.delete(id);

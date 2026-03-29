@@ -18,3 +18,4 @@ export * from "./auth/index.js";
 export * from "./collab/index.js";
 export * from "./runner/index.js";
 export * from "./workspaces/index.js";
+export * from "./replay/index.js";

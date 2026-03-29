@@ -50,6 +50,15 @@ export async function buildApp() {
           { err: error, code: error.code, meta: error.meta },
           "Prisma error",
         );
+        if (error.code === "P2021") {
+          return reply
+            .code(503)
+            .send(
+              toErrorDto(
+                "Baza de date nu are tabelele actualizate (ex. workspace_snapshot_checkpoints). Rulează: pnpm prisma migrate deploy sau pnpm db:push",
+              ),
+            );
+        }
       } else {
         request.log.error(error);
       }

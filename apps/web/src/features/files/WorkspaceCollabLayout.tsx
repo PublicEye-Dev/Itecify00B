@@ -23,9 +23,14 @@ import {
   useWorkspaceCollab,
 } from "../../lib/collab/WorkspaceCollabProvider.js";
 import { stableHexColorForUserId } from "../../lib/collab/collabColors.js";
-import { persistWorkspaceSnapshotBlocking } from "../../lib/collab/snapshotApi.js";
+import {
+  isAutosavePersistSuppressed,
+  persistWorkspaceSnapshotBlocking,
+  saveManualCheckpointToHistory,
+} from "../../lib/collab/snapshotApi.js";
 import { useWorkspaceAiPresence } from "../../lib/collab/useWorkspaceAiPresence.js";
 import { CollabMonacoEditor } from "../editor/CollabMonacoEditor.js";
+import { ReplayPanel } from "../replay/ReplayPanel.js";
 import { RunPanel } from "../run/RunPanel.js";
 import { useWorkspaceRun } from "../run/useWorkspaceRun.js";
 import { WorkspaceTerminalPanel } from "../terminal/WorkspaceTerminalPanel.js";
@@ -42,11 +47,13 @@ const LEFT_PANEL_MIN_WIDTH = 180;
 const RIGHT_PANEL_DEFAULT_WIDTH = 360;
 const RIGHT_PANEL_MIN_WIDTH = 260;
 const CENTER_PANEL_MIN_WIDTH = 360;
-const RUN_PANEL_DEFAULT_HEIGHT = 320;
-const RUN_PANEL_MIN_HEIGHT = 220;
+const BOTTOM_PANEL_DEFAULT_HEIGHT = 320;
+const BOTTOM_PANEL_MIN_HEIGHT = 220;
 const TOP_SECTION_MIN_HEIGHT = 220;
 const HANDLE_SIZE = 10;
 const KEYBOARD_RESIZE_STEP = 24;
+
+type BottomWorkspaceTab = "run" | "history" | "terminal";
 
 type ResizeHandleKind = "left" | "right" | "bottom";
 
@@ -78,9 +85,13 @@ export function WorkspaceCollabLayout({
     `${panelStorageKey}:ai`,
     RIGHT_PANEL_DEFAULT_WIDTH,
   );
-  const [runPanelHeight, setRunPanelHeight] = useStoredPanelSize(
-    `${panelStorageKey}:run`,
-    RUN_PANEL_DEFAULT_HEIGHT,
+  const [bottomPanelHeight, setBottomPanelHeight] = useStoredPanelSize(
+    `${panelStorageKey}:bottom`,
+    BOTTOM_PANEL_DEFAULT_HEIGHT,
+  );
+  const [bottomTab, setBottomTab] = useStoredBottomTab(
+    `${panelStorageKey}:bottomTab`,
+    "run",
   );
   const [activePath, setActivePath] = useState<string | null>(null);
   const [pendingSuggestions, setPendingSuggestions] = useState<
@@ -93,7 +104,6 @@ export function WorkspaceCollabLayout({
   const [draggingHandle, setDraggingHandle] = useState<ResizeHandleKind | null>(
     null,
   );
-  const [bottomTab, setBottomTab] = useState<"run" | "terminal">("run");
   const revealKeyRef = useRef(0);
   const dragCleanupRef = useRef<(() => void) | null>(null);
   const layoutBodyRef = useRef<HTMLDivElement | null>(null);
@@ -132,10 +142,10 @@ export function WorkspaceCollabLayout({
     return Math.max(RIGHT_PANEL_MIN_WIDTH, maxWidth);
   }, [getTopRowWidth, leftPanelWidth]);
 
-  const getMaxRunPanelHeight = useCallback(() => {
+  const getMaxBottomPanelHeight = useCallback(() => {
     const maxHeight =
       getLayoutBodyHeight() - TOP_SECTION_MIN_HEIGHT - HANDLE_SIZE;
-    return Math.max(RUN_PANEL_MIN_HEIGHT, maxHeight);
+    return Math.max(BOTTOM_PANEL_MIN_HEIGHT, maxHeight);
   }, [getLayoutBodyHeight]);
 
   const updateLeftPanelWidth = useCallback(
@@ -156,13 +166,17 @@ export function WorkspaceCollabLayout({
     [getMaxRightPanelWidth, setRightPanelWidth],
   );
 
-  const updateRunPanelHeight = useCallback(
+  const updateBottomPanelHeight = useCallback(
     (nextHeight: number) => {
-      setRunPanelHeight(
-        clamp(nextHeight, RUN_PANEL_MIN_HEIGHT, getMaxRunPanelHeight()),
+      setBottomPanelHeight(
+        clamp(
+          nextHeight,
+          BOTTOM_PANEL_MIN_HEIGHT,
+          getMaxBottomPanelHeight(),
+        ),
       );
     },
-    [getMaxRunPanelHeight, setRunPanelHeight],
+    [getMaxBottomPanelHeight, setBottomPanelHeight],
   );
 
   useEffect(() => {
@@ -179,8 +193,12 @@ export function WorkspaceCollabLayout({
       setRightPanelWidth((current) =>
         clamp(current, RIGHT_PANEL_MIN_WIDTH, getMaxRightPanelWidth()),
       );
-      setRunPanelHeight((current) =>
-        clamp(current, RUN_PANEL_MIN_HEIGHT, getMaxRunPanelHeight()),
+      setBottomPanelHeight((current) =>
+        clamp(
+          current,
+          BOTTOM_PANEL_MIN_HEIGHT,
+          getMaxBottomPanelHeight(),
+        ),
       );
     };
 
@@ -192,10 +210,10 @@ export function WorkspaceCollabLayout({
   }, [
     getMaxLeftPanelWidth,
     getMaxRightPanelWidth,
-    getMaxRunPanelHeight,
+    getMaxBottomPanelHeight,
     setLeftPanelWidth,
     setRightPanelWidth,
-    setRunPanelHeight,
+    setBottomPanelHeight,
   ]);
 
   const startResizeDrag = useCallback(
@@ -209,7 +227,7 @@ export function WorkspaceCollabLayout({
       const startY = event.clientY;
       const startLeftWidth = leftPanelWidth;
       const startRightWidth = rightPanelWidth;
-      const startRunHeight = runPanelHeight;
+      const startBottomHeight = bottomPanelHeight;
       const previousCursor = document.body.style.cursor;
       const previousUserSelect = document.body.style.userSelect;
 
@@ -236,7 +254,9 @@ export function WorkspaceCollabLayout({
           updateRightPanelWidth(startRightWidth - (moveEvent.clientX - startX));
           return;
         }
-        updateRunPanelHeight(startRunHeight - (moveEvent.clientY - startY));
+        updateBottomPanelHeight(
+          startBottomHeight - (moveEvent.clientY - startY),
+        );
       };
 
       const onPointerUp = () => {
@@ -250,10 +270,10 @@ export function WorkspaceCollabLayout({
     [
       leftPanelWidth,
       rightPanelWidth,
-      runPanelHeight,
+      bottomPanelHeight,
       updateLeftPanelWidth,
       updateRightPanelWidth,
-      updateRunPanelHeight,
+      updateBottomPanelHeight,
     ],
   );
 
@@ -288,22 +308,22 @@ export function WorkspaceCollabLayout({
       if (kind === "bottom") {
         if (event.key === "ArrowUp") {
           event.preventDefault();
-          updateRunPanelHeight(runPanelHeight + KEYBOARD_RESIZE_STEP);
+          updateBottomPanelHeight(bottomPanelHeight + KEYBOARD_RESIZE_STEP);
           return;
         }
         if (event.key === "ArrowDown") {
           event.preventDefault();
-          updateRunPanelHeight(runPanelHeight - KEYBOARD_RESIZE_STEP);
+          updateBottomPanelHeight(bottomPanelHeight - KEYBOARD_RESIZE_STEP);
         }
       }
     },
     [
       leftPanelWidth,
       rightPanelWidth,
-      runPanelHeight,
+      bottomPanelHeight,
       updateLeftPanelWidth,
       updateRightPanelWidth,
-      updateRunPanelHeight,
+      updateBottomPanelHeight,
     ],
   );
 
@@ -317,14 +337,14 @@ export function WorkspaceCollabLayout({
         updateRightPanelWidth(RIGHT_PANEL_DEFAULT_WIDTH);
         return;
       }
-      updateRunPanelHeight(RUN_PANEL_DEFAULT_HEIGHT);
+      updateBottomPanelHeight(BOTTOM_PANEL_DEFAULT_HEIGHT);
     },
-    [updateLeftPanelWidth, updateRightPanelWidth, updateRunPanelHeight],
+    [updateLeftPanelWidth, updateRightPanelWidth, updateBottomPanelHeight],
   );
 
   const leftPanelMaxWidth = getMaxLeftPanelWidth();
   const rightPanelMaxWidth = getMaxRightPanelWidth();
-  const runPanelMaxHeight = getMaxRunPanelHeight();
+  const bottomPanelMaxHeight = getMaxBottomPanelHeight();
 
   useEffect(() => {
     if (paths.length === 0) {
@@ -383,6 +403,88 @@ export function WorkspaceCollabLayout({
       }));
   }, [pendingSuggestions, activePath]);
 
+  const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
+  const [manualSaveBusy, setManualSaveBusy] = useState(false);
+  const [manualSaveHint, setManualSaveHint] = useState<string | null>(null);
+  const manualSaveInFlight = useRef(false);
+  const manualSaveHintTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const handleManualSaveRef = useRef<() => Promise<void>>(async () => {});
+
+  const handleManualSave = useCallback(async () => {
+    if (manualSaveInFlight.current) return;
+    if (isAutosavePersistSuppressed()) {
+      window.alert(
+        "Salvare checkpoint indisponibilă momentan (restore sau operație în curs). Încearcă după câteva secunde.",
+      );
+      return;
+    }
+    manualSaveInFlight.current = true;
+    setManualSaveBusy(true);
+    setManualSaveHint(null);
+    try {
+      const { checkpointId } = await saveManualCheckpointToHistory(
+        workspaceId,
+        Y.encodeStateAsUpdate(ydoc),
+      );
+      setHistoryRefreshKey((k) => k + 1);
+      window.dispatchEvent(
+        new CustomEvent("itecify-checkpoints-changed", {
+          detail: { workspaceId },
+        }),
+      );
+      const t = new Date();
+      const timeStr = t.toLocaleTimeString("ro-RO", {
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+      });
+      setManualSaveHint(
+        `Checkpoint salvat (${timeStr}) · id ${checkpointId.slice(0, 8)}…`,
+      );
+      if (manualSaveHintTimerRef.current) {
+        clearTimeout(manualSaveHintTimerRef.current);
+      }
+      manualSaveHintTimerRef.current = setTimeout(() => {
+        setManualSaveHint(null);
+        manualSaveHintTimerRef.current = null;
+      }, 4500);
+    } catch (e) {
+      window.alert(
+        e instanceof Error ? e.message : "Salvarea checkpoint-ului a eșuat.",
+      );
+    } finally {
+      manualSaveInFlight.current = false;
+      setManualSaveBusy(false);
+    }
+  }, [workspaceId, ydoc]);
+
+  useEffect(() => {
+    handleManualSaveRef.current = handleManualSave;
+  }, [handleManualSave]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!(e.ctrlKey || e.metaKey) || e.key !== "s") return;
+      e.preventDefault();
+      e.stopPropagation();
+      void handleManualSaveRef.current();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (manualSaveHintTimerRef.current) {
+        clearTimeout(manualSaveHintTimerRef.current);
+      }
+    };
+  }, []);
+
   const runner = useWorkspaceRun({
     workspaceId,
     template: workspaceTemplate,
@@ -391,6 +493,9 @@ export function WorkspaceCollabLayout({
         workspaceId,
         Y.encodeStateAsUpdate(ydoc),
       );
+    },
+    onAfterSnapshotPersist: () => {
+      setHistoryRefreshKey((k) => k + 1);
     },
   });
 
@@ -505,6 +610,7 @@ export function WorkspaceCollabLayout({
           flex: 1,
           minHeight: 0,
           flexDirection: "column",
+          overflowY: "auto",
         }}
       >
         <div
@@ -630,7 +736,7 @@ export function WorkspaceCollabLayout({
         </div>
 
         <ResizeHandle
-          ariaLabel="Resize Run Pipeline"
+          ariaLabel="Redimensionează panoul inferior (Run / Istoric / Terminal)"
           isDragging={draggingHandle === "bottom"}
           onDoubleClick={() => {
             resetPanelSize("bottom");
@@ -646,109 +752,254 @@ export function WorkspaceCollabLayout({
 
         <div
           style={{
-            height: runPanelHeight,
-            minHeight: RUN_PANEL_MIN_HEIGHT,
-            maxHeight: runPanelMaxHeight,
+            height: bottomPanelHeight,
+            minHeight: BOTTOM_PANEL_MIN_HEIGHT,
+            maxHeight: bottomPanelMaxHeight,
+            flexShrink: 0,
             minWidth: 0,
-            overflow: "hidden",
             display: "flex",
             flexDirection: "column",
+            overflow: "hidden",
+            background: "#0f1419",
           }}
         >
           <div
             style={{
-              display: "flex",
-              gap: 0,
-              borderBottom: "1px solid #2a2a2a",
-              background: "#181818",
               flexShrink: 0,
+              borderBottom: "1px solid #2a3340",
             }}
           >
-            <button
-              type="button"
-              onClick={() => {
-                setBottomTab("run");
-              }}
+            <div
               style={{
-                border: "none",
-                borderBottom:
-                  bottomTab === "run" ? "2px solid #38bdf8" : "2px solid transparent",
-                background: bottomTab === "run" ? "#1f2937" : "transparent",
-                color: "#e5e7eb",
-                padding: "8px 14px",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: bottomTab === "run" ? 600 : 500,
+                display: "flex",
+                flexWrap: "wrap",
+                alignItems: "flex-end",
+                gap: 8,
+                padding: "6px 10px 0",
               }}
             >
-              Run Pipeline
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setBottomTab("terminal");
-              }}
-              style={{
-                border: "none",
-                borderBottom:
-                  bottomTab === "terminal"
-                    ? "2px solid #38bdf8"
-                    : "2px solid transparent",
-                background: bottomTab === "terminal" ? "#1f2937" : "transparent",
-                color: "#e5e7eb",
-                padding: "8px 14px",
-                cursor: "pointer",
-                fontSize: 13,
-                fontWeight: bottomTab === "terminal" ? 600 : 500,
-              }}
-            >
-              Terminal
-            </button>
+              <div
+                role="tablist"
+                aria-label="Panou inferior workspace"
+                style={{
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: 4,
+                  flex: "1 1 200px",
+                  minWidth: 0,
+                }}
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={bottomTab === "run"}
+                  id={`${workspaceId}-tab-run`}
+                  aria-controls={`${workspaceId}-panel-run`}
+                  onClick={() => {
+                    setBottomTab("run");
+                  }}
+                  style={{
+                    padding: "8px 14px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    border: "none",
+                    borderRadius: "8px 8px 0 0",
+                    cursor: "pointer",
+                    background:
+                      bottomTab === "run"
+                        ? "rgba(56, 189, 248, 0.12)"
+                        : "transparent",
+                    color: bottomTab === "run" ? "#e5eef6" : "#94a8c4",
+                    borderBottom:
+                      bottomTab === "run"
+                        ? "2px solid #38bdf8"
+                        : "2px solid transparent",
+                    marginBottom: -1,
+                  }}
+                >
+                  Run Pipeline
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={bottomTab === "history"}
+                  id={`${workspaceId}-tab-history`}
+                  aria-controls={`${workspaceId}-panel-history`}
+                  onClick={() => {
+                    setBottomTab("history");
+                  }}
+                  style={{
+                    padding: "8px 14px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    border: "none",
+                    borderRadius: "8px 8px 0 0",
+                    cursor: "pointer",
+                    background:
+                      bottomTab === "history"
+                        ? "rgba(56, 189, 248, 0.12)"
+                        : "transparent",
+                    color: bottomTab === "history" ? "#e5eef6" : "#94a8c4",
+                    borderBottom:
+                      bottomTab === "history"
+                        ? "2px solid #38bdf8"
+                        : "2px solid transparent",
+                    marginBottom: -1,
+                  }}
+                >
+                  Istoric & replay
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={bottomTab === "terminal"}
+                  id={`${workspaceId}-tab-terminal`}
+                  aria-controls={`${workspaceId}-panel-terminal`}
+                  onClick={() => {
+                    setBottomTab("terminal");
+                  }}
+                  style={{
+                    padding: "8px 14px",
+                    fontSize: 13,
+                    fontWeight: 600,
+                    border: "none",
+                    borderRadius: "8px 8px 0 0",
+                    cursor: "pointer",
+                    background:
+                      bottomTab === "terminal"
+                        ? "rgba(56, 189, 248, 0.12)"
+                        : "transparent",
+                    color: bottomTab === "terminal" ? "#e5eef6" : "#94a8c4",
+                    borderBottom:
+                      bottomTab === "terminal"
+                        ? "2px solid #38bdf8"
+                        : "2px solid transparent",
+                    marginBottom: -1,
+                  }}
+                >
+                  Terminal
+                </button>
+              </div>
+              <button
+                type="button"
+                disabled={manualSaveBusy}
+                title="Salvează starea curentă a workspace-ului ca punct în istoric (Ctrl+S / Cmd+S)"
+                onClick={() => {
+                  void handleManualSave();
+                }}
+                style={{
+                  padding: "8px 14px",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  borderRadius: 8,
+                  cursor: manualSaveBusy ? "wait" : "pointer",
+                  border: "1px solid rgba(56, 189, 248, 0.45)",
+                  background: "rgba(56, 189, 248, 0.14)",
+                  color: "#e0f2fe",
+                  opacity: manualSaveBusy ? 0.75 : 1,
+                  whiteSpace: "nowrap",
+                  marginBottom: 2,
+                }}
+              >
+                {manualSaveBusy ? "Se salvează checkpoint…" : "Salvează checkpoint"}
+              </button>
+            </div>
           </div>
+          {manualSaveHint ? (
+            <div
+              role="status"
+              style={{
+                padding: "4px 10px 6px",
+                fontSize: 12,
+                color: "#86efac",
+                flexShrink: 0,
+              }}
+            >
+              {manualSaveHint}
+            </div>
+          ) : null}
+
           <div
+            role="tabpanel"
+            id={`${workspaceId}-panel-run`}
+            aria-labelledby={`${workspaceId}-tab-run`}
+            hidden={bottomTab !== "run"}
             style={{
               flex: 1,
               minHeight: 0,
-              overflow: bottomTab === "terminal" ? "hidden" : "auto",
+              display: bottomTab === "run" ? "flex" : "none",
+              flexDirection: "column",
+              overflow: "auto",
             }}
           >
-            {bottomTab === "run" ? (
-              <RunPanel
-                job={runner.job}
-                liveLogs={runner.liveLogs}
-                error={runner.error}
-                isStarting={runner.isStarting}
-                canStart={runner.canStart}
-                streamState={runner.streamState}
-                template={workspaceTemplate}
-                onRun={async () => {
-                  await runner.startRun();
-                }}
-              />
-            ) : (
-              <WorkspaceTerminalPanel
-                workspaceId={workspaceId}
-                currentUserId={currentUser.id}
-                currentUserName={currentUser.name}
-                wsEnabled={bottomTab === "terminal"}
-                onBeforeEnsureSandbox={async () => {
-                  await persistWorkspaceSnapshotBlocking(
-                    workspaceId,
-                    Y.encodeStateAsUpdate(ydoc),
-                  );
-                }}
-                operatorRunner={{
-                  startRun: runner.startRun,
-                  job: runner.job,
-                  liveLogs: runner.liveLogs,
-                  streamState: runner.streamState,
-                  isStarting: runner.isStarting,
-                  canStart: runner.canStart,
-                  runError: runner.error,
-                  templateLabel: workspaceTemplate,
-                }}
-              />
-            )}
+            <RunPanel
+              job={runner.job}
+              liveLogs={runner.liveLogs}
+              error={runner.error}
+              isStarting={runner.isStarting}
+              canStart={runner.canStart}
+              streamState={runner.streamState}
+              template={workspaceTemplate}
+              onRun={async () => {
+                await runner.startRun();
+              }}
+            />
+          </div>
+
+          <div
+            role="tabpanel"
+            id={`${workspaceId}-panel-history`}
+            aria-labelledby={`${workspaceId}-tab-history`}
+            hidden={bottomTab !== "history"}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: bottomTab === "history" ? "flex" : "none",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+          >
+            <ReplayPanel
+              workspaceId={workspaceId}
+              refreshKey={historyRefreshKey}
+            />
+          </div>
+
+          <div
+            role="tabpanel"
+            id={`${workspaceId}-panel-terminal`}
+            aria-labelledby={`${workspaceId}-tab-terminal`}
+            hidden={bottomTab !== "terminal"}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: bottomTab === "terminal" ? "flex" : "none",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+          >
+            <WorkspaceTerminalPanel
+              workspaceId={workspaceId}
+              currentUserId={currentUser.id}
+              currentUserName={currentUser.name}
+              wsEnabled={bottomTab === "terminal"}
+              onBeforeEnsureSandbox={async () => {
+                await persistWorkspaceSnapshotBlocking(
+                  workspaceId,
+                  Y.encodeStateAsUpdate(ydoc),
+                );
+              }}
+              operatorRunner={{
+                startRun: runner.startRun,
+                job: runner.job,
+                liveLogs: runner.liveLogs,
+                streamState: runner.streamState,
+                isStarting: runner.isStarting,
+                canStart: runner.canStart,
+                runError: runner.error,
+                templateLabel: workspaceTemplate,
+              }}
+            />
           </div>
         </div>
       </div>
@@ -812,6 +1063,28 @@ function ResizeHandle({
       />
     </div>
   );
+}
+
+function useStoredBottomTab(
+  key: string,
+  fallback: BottomWorkspaceTab,
+): readonly [BottomWorkspaceTab, (tab: BottomWorkspaceTab) => void] {
+  const [tab, setTab] = useState<BottomWorkspaceTab>(() => {
+    if (typeof window === "undefined") {
+      return fallback;
+    }
+    const raw = window.localStorage.getItem(key);
+    if (raw === "run" || raw === "history" || raw === "terminal") {
+      return raw;
+    }
+    return fallback;
+  });
+
+  useEffect(() => {
+    window.localStorage.setItem(key, tab);
+  }, [key, tab]);
+
+  return [tab, setTab] as const;
 }
 
 function useStoredPanelSize(key: string, fallback: number) {
